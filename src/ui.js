@@ -74,13 +74,16 @@ export class UI {
     this.debugEl = el('div', { id: 'debug' }); this.debugEl.style.display = 'none'; root.appendChild(this.debugEl);
 
     this.hintEl = el('div', { id: 'hint' });
-    this.hintEl.innerHTML = 'Click to play &nbsp;·&nbsp; WASD move · Space jump · double-Space fly · Shift sneak/down · Ctrl sprint · E inventory · G mode · F3 debug · 1-9 / wheel hotbar · LMB break · RMB place/use';
+    this.hintEl.innerHTML = 'Click to play &nbsp;·&nbsp; WASD move · Space jump · double-Space fly · Shift sneak/down · Ctrl sprint · E inventory · G mode · F3 debug · 1-9 / wheel hotbar · LMB break · RMB place/use · K save (auto-saves too)';
     root.appendChild(this.hintEl);
 
     // death screen
     this.deathEl = el('div', { id: 'death' }); this.deathEl.style.display = 'none';
     this.deathEl.innerHTML = '<h1>You Died!</h1><p>Respawning…</p>';
     root.appendChild(this.deathEl);
+
+    // saved toast
+    this.toastEl = el('div', { id: 'toast' }); this.toastEl.style.display = 'none'; root.appendChild(this.toastEl);
 
     // container overlay
     this.screenEl = el('div', { id: 'screen' }); this.screenEl.style.display = 'none';
@@ -331,6 +334,13 @@ export class UI {
 
   setHint(show) { this.hintEl.style.display = show ? 'block' : 'none'; }
   toggleDebug() { this.debugEl.style.display = this.debugEl.style.display === 'none' ? 'block' : 'none'; }
+  flashSaved() {
+    this.toastEl.textContent = '✓ Saved';
+    this.toastEl.style.display = 'block';
+    this.toastEl.style.opacity = '1';
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { this.toastEl.style.opacity = '0'; }, 1200);
+  }
 
   // ===================== per-frame HUD update =====================
   update(game, fps) {

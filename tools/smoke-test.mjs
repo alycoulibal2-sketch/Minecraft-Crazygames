@@ -218,5 +218,43 @@ assert(blockDrops(BLOCKS[ID.bedrock], itemByName('diamond_pickaxe'), seedRng).le
   assert(pl.health === 20 - 9, 'survival: a 12-block fall deals 9 damage');
 }
 
+console.log('\n== Persistence (save/load round-trip) ==');
+const { serializeGame, applySave } = await import(S('persistence.js'));
+{
+  // build a minimal "game-like" object the persistence functions understand
+  const w = new World(24680);
+  for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) w.gen.generateTerrain(w.ensureChunk(cx, cz));
+  const pl = new Player(w);
+  pl.pos = [12.5, 70, -8.5]; pl.yaw = 1.2; pl.pitch = -0.3;
+  pl.inventory.add(ITEM_ID['diamond'], 5);
+  pl.inventory.add(ITEM_ID['iron_pickaxe'], 1);
+  pl.inventory.slots.find(s => s && s.id === ITEM_ID['iron_pickaxe']).dmg = 17;
+  const fakeGame = {
+    world: w, player: pl, mode: 'survival', timeOfDay: 0.6, renderDistance: 7,
+    furnaces: new Map([['1,2,3', { input: { id: ITEM_ID['raw_iron'], count: 2 }, fuel: null, output: null, burn: 0, burnMax: 0, progress: 0 }]]),
+    spawnPoint: [0.5, 64, 0.5],
+  };
+  // make some edits
+  w.setBlock(5, 65, 5, ID.glowstone);
+  w.setBlock(6, 65, 5, ID.tnt);
+  const blob = JSON.parse(JSON.stringify(serializeGame(fakeGame)));
+  assert(blob.seed === 24680, 'save records the world seed');
+  assert(blob.edits.length === 2, 'save records player edits (2)');
+
+  // load into a fresh world/player
+  const w2 = new World(blob.seed);
+  for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) { const c = w2.ensureChunk(cx, cz); w2.gen.generateTerrain(c); }
+  const pl2 = new Player(w2);
+  const game2 = { world: w2, player: pl2, mode: 'creative', timeOfDay: 0, renderDistance: 6, furnaces: new Map(), spawnPoint: [0, 0, 0] };
+  applySave(game2, blob);
+  assert(w2.getBlock(5, 65, 5) === ID.glowstone, 'loaded edit restored (glowstone)');
+  assert(w2.getBlock(6, 65, 5) === ID.tnt, 'loaded edit restored (tnt)');
+  assert(pl2.inventory.countOf(ITEM_ID['diamond']) === 5, 'loaded inventory restored (5 diamonds)');
+  const pick = pl2.inventory.slots.find(s => s && s.id === ITEM_ID['iron_pickaxe']);
+  assert(pick && pick.dmg === 17, 'loaded tool durability restored');
+  assert(game2.mode === 'survival' && Math.abs(pl2.pos[0] - 12.5) < 1e-6, 'loaded mode + position restored');
+  assert(game2.furnaces.get('1,2,3').input.id === ITEM_ID['raw_iron'], 'loaded furnace state restored');
+}
+
 console.log('\n' + (failures === 0 ? '✅ ALL SMOKE TESTS PASSED' : `❌ ${failures} ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);

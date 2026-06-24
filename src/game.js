@@ -11,6 +11,10 @@ import { DEFAULT_RENDER_DISTANCE, PLAYER_EYE } from './config.js';
 import { WATER, ID } from './blocks.js';
 import { ITEMS } from './items.js';
 import { smeltResult } from './recipes.js';
+import { CHUNK_X, CHUNK_Z } from './config.js';
+import { save, load, applySave } from './persistence.js';
+
+const AUTOSAVE_INTERVAL = 25; // seconds
 
 const SMELT_TIME = 5;   // seconds to smelt one item
 
@@ -21,7 +25,9 @@ export class Game {
     this.canvas = canvas;
     this.gl = getGL(canvas);
     this.renderer = new Renderer(this.gl);
-    this.world = new World((Math.random() * 1e9) >>> 0);
+    const saved = load();
+    const seed = saved ? (saved.seed >>> 0) : ((Math.random() * 1e9) >>> 0);
+    this.world = new World(seed);
     this.player = new Player(this.world);
     this.camera = new Camera();
     this.input = new Input(canvas);
@@ -36,28 +42,41 @@ export class Game {
     this._regenTimer = 0; this._starveTimer = 0; this._airTimer = 0; this._deathTimer = 0;
     this.furnaces = new Map();   // "x,y,z" -> furnace state
     this.spawnPoint = [0.5, 80, 0.5];
+    this._autosaveTimer = 0;
 
     this._spawn();
+    if (saved) {
+      const pos = applySave(this, saved);
+      if (pos) this._ensureAround(pos[0], pos[2]);  // generate the loaded location
+      this.player.flying = (this.mode !== 'survival');
+    }
+
     this._resize();
     addEventListener('resize', () => this._resize());
+    addEventListener('beforeunload', () => save(this));
 
     this.last = performance.now();
     this._loop = this._loop.bind(this);
     requestAnimationFrame(this._loop);
   }
 
+  // Synchronously generate + decorate the 3x3 chunks around a world position.
+  _ensureAround(wx, wz) {
+    const pcx = Math.floor(wx / CHUNK_X), pcz = Math.floor(wz / CHUNK_Z);
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const c = this.world.ensureChunk(pcx + dx, pcz + dz);
+        if (!c.generated) { this.world.gen.generateTerrain(c); this.world.applyEdits(c); c.dirty = true; }
+      }
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const c = this.world.getChunk(pcx + dx, pcz + dz);
+        if (c && !c.decorated && this.world.neighborsGenerated(c.cx, c.cz, true)) { this.world.gen.decorate(c, this.world); c.dirty = true; }
+      }
+  }
+
   _spawn() {
-    // Synchronously generate the spawn area so the player has ground.
-    for (let dz = -1; dz <= 1; dz++)
-      for (let dx = -1; dx <= 1; dx++) {
-        const c = this.world.ensureChunk(dx, dz);
-        if (!c.generated) this.world.gen.generateTerrain(c);
-      }
-    for (let dz = -1; dz <= 1; dz++)
-      for (let dx = -1; dx <= 1; dx++) {
-        const c = this.world.getChunk(dx, dz);
-        if (c && !c.decorated) this.world.gen.decorate(c, this.world);
-      }
+    this._ensureAround(0, 0);
     const sy = this.world.surfaceHeight(0, 0);
     this.player.pos = [0.5, sy + 1.0, 0.5];
     this.spawnPoint = [0.5, sy + 1.0, 0.5];
@@ -192,6 +211,7 @@ export class Game {
     if (input.wasTapped('BracketRight')) this.renderDistance = Math.min(16, this.renderDistance + 1);
     if (input.wasTapped('BracketLeft')) this.renderDistance = Math.max(3, this.renderDistance - 1);
     if (input.wasTapped('Escape') && this.ui.invOpen) this.ui.toggleInventory(false);
+    if (input.wasTapped('KeyK')) { if (save(this)) this.ui.flashSaved?.(); }   // manual save
   }
 
   _env() {
@@ -232,6 +252,10 @@ export class Game {
     this.world.update(this.player.pos[0], this.player.pos[2], this.renderDistance);
     this.renderer.reconcile(this.world);
     this.renderer.render(this.world, this.camera, this.player, this._env());
+
+    // autosave
+    this._autosaveTimer += dt;
+    if (this._autosaveTimer >= AUTOSAVE_INTERVAL) { this._autosaveTimer = 0; if (save(this)) this.ui.flashSaved?.(); }
 
     // fps
     this._frames++; this._fpsTimer += dt;

@@ -70,6 +70,13 @@ export class Inventory {
 
   firstEmpty() { return this.slots.findIndex(s => !s); }
 
-  serialize() { return this.slots.map(s => s ? [s.id, s.count] : null); }
-  load(data) { this.slots = data.map(s => s ? { id: s[0], count: s[1] } : null); }
+  serialize() { return this.slots.map(s => s ? [s.id, s.count, s.dmg || 0] : null); }
+  load(data) {
+    this.slots = new Array(this.size).fill(null);
+    if (!data) return;
+    for (let i = 0; i < Math.min(this.size, data.length); i++) {
+      const s = data[i];
+      this.slots[i] = s ? { id: s[0], count: s[1], dmg: s[2] || 0 } : null;
+    }
+  }
 }
