@@ -14,7 +14,7 @@ export class UI {
     this.atlasCanvas = atlasCanvas;
     this.atlasUV = atlasUV;
     this.player = player;
-    this.iconCache = new Map();
+    this._hotbarSig = null;
     this.screen = null;          // null | 'inventory' | 'crafting' | 'furnace' | 'creative'
     this.invOpen = false;        // any blocking screen open
     this.cursor = null;          // {id,count} held by mouse
@@ -25,16 +25,16 @@ export class UI {
   }
 
   // ---- icon drawing (by atlas tile name) ----
+  // Returns a FRESH canvas every call: a DOM node can only live in one slot, so
+  // icons must never be shared between slots (duplicate items would render blank).
   drawTile(tileName, size) {
-    const key = tileName + ':' + size;
-    if (this.iconCache.has(key)) return this.iconCache.get(key);
+    const uv = this.atlasUV.get(tileName);
+    if (!uv) return null;
     const c = document.createElement('canvas');
     c.width = size; c.height = size;
     const ctx = c.getContext('2d');
     ctx.imageSmoothingEnabled = false;
-    const uv = this.atlasUV.get(tileName);
-    if (uv) ctx.drawImage(this.atlasCanvas, uv[0] * ATLAS_PX, uv[1] * ATLAS_PX, TILE, TILE, 0, 0, size, size);
-    this.iconCache.set(key, c);
+    ctx.drawImage(this.atlasCanvas, uv[0] * ATLAS_PX, uv[1] * ATLAS_PX, TILE, TILE, 0, 0, size, size);
     return c;
   }
   iconForBlock(blockId, size = 44) {
@@ -384,6 +384,12 @@ export class UI {
 
   _refreshHotbar() {
     const p = this.player;
+    // change-detection: skip the DOM rebuild when nothing visible changed
+    let sig = p.mode + '|' + p.selected + '|';
+    if (p.mode === 'creative') sig += p.hotbar.join(',');
+    else for (let i = 0; i < 9; i++) { const s = p.inventory.slots[i]; sig += (s ? s.id + 'x' + s.count : '_') + ','; }
+    if (sig === this._hotbarSig) return;
+    this._hotbarSig = sig;
     for (let i = 0; i < 9; i++) {
       const slot = this.slotEls[i];
       slot.classList.toggle('selected', i === p.selected);

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "serve": "node tools/serve.js",
-    "test": "node tools/smoke-test.mjs"
+    "test": "node tools/smoke-test.mjs && node tools/ui-test.mjs"
   },
   "license": "MIT",
   "private": true
