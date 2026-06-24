@@ -51,15 +51,20 @@ Requires a browser with **WebGL2** (Chrome, Edge, Firefox, Safari 15+).
 - **Day/night cycle** with dynamic sky gradient, sunset tint, and distance fog.
 - **Creative inventory** picker, hotbar, crosshair, and an `F3` debug HUD.
 
+## 👹 Mobs
+
+Passive animals (pig, cow, sheep, chicken) spawn on grass in daylight and wander; hostile zombies spawn in the dark, chase the player, attack on contact, and burn in sunlight. Mobs are drawn as shaded box models, have health and knockback, drop items into your inventory when killed in survival (meat, leather, wool, feathers…), and are hit by left-clicking with reach + weapon damage that scales by tool.
+
 ## 🗺 Roadmap
 
 - [x] Creative mode (build/fly/infinite world)
-- [ ] **Survival**: block hardness & mining times, tool tiers, block drops → inventory, crafting grid & recipes, smelting
-- [ ] Health, hunger, fall damage, food
-- [ ] Mobs (passive + hostile) with simple AI & pathing
-- [ ] Smooth flood-fill lighting (sky + block light)
+- [x] **Survival**: block hardness & mining times, tool tiers, block drops → inventory, crafting grid & recipes, furnace smelting
+- [x] Health, hunger, saturation, regen, starvation, fall/drown/lava damage, death & respawn
+- [x] Mobs (passive + hostile) with simple AI, drops, and melee combat
+- [x] World save/load (localStorage) with autosave
+- [ ] Smooth flood-fill lighting (sky + block light, torches)
 - [ ] Greedy meshing + frustum culling for higher render distance
-- [ ] World save/load (IndexedDB) and seeds UI
+- [ ] Mob pathfinding & breeding; item-entity drops you walk over
 - [ ] Mobile touch controls
 - [ ] Sound (procedural / original)
 
@@ -78,10 +83,13 @@ Pure ES modules under `src/`, no bundler:
 | `worldgen.js` | terrain, biomes, caves, ores, trees, plants |
 | `world.js` | chunk manager, generation pipeline, raycast |
 | `glutil.js` / `shaders.js` | WebGL2 helpers & GLSL |
-| `renderer.js` | sky, chunk meshes, selection box |
-| `camera.js` / `input.js` / `player.js` | view, controls, physics & interaction |
-| `ui.js` | crosshair, hotbar, inventory, HUD |
-| `game.js` / `main.js` | main loop, day/night, bootstrap |
+| `renderer.js` | sky, chunk meshes, entities, selection box |
+| `items.js` / `inventory.js` / `recipes.js` | items & tools, stack inventory, crafting & smelting |
+| `entities.js` | mobs: physics, AI, spawning, drops, combat |
+| `persistence.js` | save/load to localStorage |
+| `camera.js` / `input.js` / `player.js` | view, controls, physics, survival & interaction |
+| `ui.js` | crosshair, hotbar, inventory/crafting/furnace screens, HUD |
+| `game.js` / `main.js` | main loop, day/night, survival tick, bootstrap |
 
 `tools/smoke-test.mjs` runs the DOM-free engine headlessly (`npm test`) to validate world-gen, meshing, raycast, physics and texture coverage in CI without a browser.
 

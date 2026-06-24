@@ -207,8 +207,18 @@ export class Player {
     if (this.mode === 'spectator') { this.breakTarget = null; this.breakProgress = 0; return; }
     const sneak = input.isDown('ShiftLeft');
 
-    // ---- break (left held) ----
-    if (hit.hit && (input.buttons[0] || input.touch.break)) {
+    // ---- attack mobs (priority over breaking the block behind them) ----
+    const mobHit = (game && game.entities) ? game.entities.raycastMob(eye, dir, REACH) : null;
+    const mobCloser = mobHit && (!hit.hit || mobHit.t < hit.t);
+    if (mobCloser) {
+      this.breakTarget = null; this.breakProgress = 0;
+      if (input.clicked[0]) {
+        const it = this.heldItem();
+        const dmg = this.mode === 'creative' ? 1000 : (it && it.attack ? it.attack : 1);
+        mobHit.mob.hurt(dmg, this.yaw);
+        if (this.mode === 'survival') { this.damageTool(); this.exhaustion += 0.1; }
+      }
+    } else if (hit.hit && (input.buttons[0] || input.touch.break)) {
       const b = BLOCKS[hit.id];
       const tk = hit.x + ',' + hit.y + ',' + hit.z;
       if (b.hardness < 0) { this.breakTarget = null; this.breakProgress = 0; }  // unbreakable

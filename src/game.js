@@ -13,6 +13,7 @@ import { ITEMS } from './items.js';
 import { smeltResult } from './recipes.js';
 import { CHUNK_X, CHUNK_Z } from './config.js';
 import { save, load, applySave } from './persistence.js';
+import { EntityManager } from './entities.js';
 
 const AUTOSAVE_INTERVAL = 25; // seconds
 
@@ -29,6 +30,7 @@ export class Game {
     const seed = saved ? (saved.seed >>> 0) : ((Math.random() * 1e9) >>> 0);
     this.world = new World(seed);
     this.player = new Player(this.world);
+    this.entities = new EntityManager(this.world);
     this.camera = new Camera();
     this.input = new Input(canvas);
     this.ui = new UI(uiRoot, this.renderer.atlasCanvas, this.renderer.atlasUV, this.player);
@@ -241,17 +243,19 @@ export class Game {
 
     if (!this.timePaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
 
+    const env = this._env();
     this.player.mode = this.mode;
     if (!this.ui.invOpen) {
       this.player.update(dt, this.input, this);
     }
     this._survivalTick(dt);
     this._tickFurnaces(dt);
+    this.entities.update(dt, this.player, this, env);
     this.ui.setHint(!this.input.locked && !this.ui.invOpen);
 
     this.world.update(this.player.pos[0], this.player.pos[2], this.renderDistance);
     this.renderer.reconcile(this.world);
-    this.renderer.render(this.world, this.camera, this.player, this._env());
+    this.renderer.render(this.world, this.camera, this.player, env, this.entities);
 
     // autosave
     this._autosaveTimer += dt;

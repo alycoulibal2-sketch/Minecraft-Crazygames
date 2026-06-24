@@ -265,6 +265,13 @@ GEN.i_bread = (t, r) => { for (let y = 6; y <= 11; y++) for (let x = 3; x <= 12;
 GEN.i_wheat = (t, r) => { for (let y = 3; y < TILE; y++) { t.px(7, y, 200, 180, 70); t.px(8, y, 180, 160, 60); } for (let y = 4; y < 12; y += 2) { t.px(6, y, 220, 200, 90); t.px(9, y, 220, 200, 90); } };
 GEN.i_porkchop = (t, r) => { blob(t, 8, 9, 4, [225, 150, 150], r); blob(t, 6, 7, 1, [255, 200, 200], r); t.px(11, 11, 240, 240, 240); };
 GEN.i_cooked_porkchop = (t, r) => { blob(t, 8, 9, 4, [170, 100, 60], r); blob(t, 6, 7, 1, [200, 140, 90], r); t.px(11, 11, 230, 220, 200); };
+GEN.i_leather = (t, r) => { for (let y = 5; y <= 11; y++) for (let x = 4; x <= 11; x++) { const n = (r() * 2 - 1) * 14; t.px(x, y, cl(150 + n), cl(95 + n), cl(55 + n)); } t.px(5, 6, 110, 70, 40); t.px(10, 10, 110, 70, 40); };
+GEN.i_feather = (t, r) => { for (let i = 0; i <= 9; i++) { const x = 5 + (i * 0.4 | 0), y = 13 - i; t.px(x, y, 240, 240, 245); t.px(x + 1, y, 200, 200, 210); } for (let k = 1; k <= 3; k++) { t.px(6 + k, 6 + k, 235, 235, 240); t.px(6 - k + 4, 6 + k, 235, 235, 240); } };
+GEN.i_mutton = (t, r) => { blob(t, 8, 9, 4, [220, 130, 130], r); blob(t, 6, 7, 1, [250, 190, 190], r); t.px(5, 11, 240, 240, 240); };
+GEN.i_cooked_mutton = (t, r) => { blob(t, 8, 9, 4, [150, 90, 55], r); blob(t, 6, 7, 1, [190, 130, 85], r); };
+GEN.i_chicken_meat = (t, r) => { blob(t, 8, 9, 4, [240, 200, 190], r); blob(t, 6, 7, 1, [255, 225, 215], r); };
+GEN.i_cooked_chicken = (t, r) => { blob(t, 8, 9, 4, [200, 150, 90], r); blob(t, 6, 7, 1, [225, 180, 120], r); };
+GEN.i_rotten_flesh = (t, r) => { blob(t, 8, 9, 4, [110, 95, 70], r); speckle(t, [70, 90, 50], 10, r); blob(t, 6, 7, 1, [130, 120, 90], r); };
 {
   const MATCOL = { wooden: [150, 110, 60], stone: [130, 130, 130], iron: [225, 225, 230], gold: [245, 215, 90], diamond: [110, 235, 235] };
   for (const [mat, col] of Object.entries(MATCOL))

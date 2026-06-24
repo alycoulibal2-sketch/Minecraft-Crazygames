@@ -93,6 +93,16 @@ export function dirFromYawPitch(yaw, pitch) {
   return [-sinY * cosP, sinP, -cosY * cosP];
 }
 
+// Model matrix: translate(tx,ty,tz) * rotateY(yaw). Column-major.
+export function modelMatrix(out, tx, ty, tz, yaw) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  out[0] = c; out[1] = 0; out[2] = -s; out[3] = 0;
+  out[4] = 0; out[5] = 1; out[6] = 0; out[7] = 0;
+  out[8] = s; out[9] = 0; out[10] = c; out[11] = 0;
+  out[12] = tx; out[13] = ty; out[14] = tz; out[15] = 1;
+  return out;
+}
+
 export function clamp(x, lo, hi) { return x < lo ? lo : (x > hi ? hi : x); }
 export function lerp(a, b, t) { return a + (b - a) * t; }
 export function fract(x) { return x - Math.floor(x); }

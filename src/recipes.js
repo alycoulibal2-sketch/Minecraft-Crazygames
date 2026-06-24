@@ -118,6 +118,7 @@ const SMELT_DEFS = [
   ['sand', 'glass'], ['cobblestone', 'stone'], ['stone', 'stone_bricks'],
   ['oak_log', 'charcoal'], ['birch_log', 'charcoal'], ['spruce_log', 'charcoal'],
   ['porkchop', 'cooked_porkchop'], ['clay', 'bricks'],
+  ['mutton', 'cooked_mutton'], ['chicken_meat', 'cooked_chicken'],
 ];
 let SMELT = null;
 export function smeltResult(id) {

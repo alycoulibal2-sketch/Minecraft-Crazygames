@@ -381,7 +381,7 @@ export class UI {
       const held = p.heldItem ? p.heldItem() : null;
       this.debugEl.innerHTML =
         `<b>Minecraft Crazygames</b> (${game.mode})<br>` +
-        `fps: ${fps.toFixed(0)} · chunks: ${game.world.chunks.size}<br>` +
+        `fps: ${fps.toFixed(0)} · chunks: ${game.world.chunks.size} · mobs: ${game.entities ? game.entities.mobs.length : 0}<br>` +
         `xyz: ${p.pos[0].toFixed(1)} / ${p.pos[1].toFixed(1)} / ${p.pos[2].toFixed(1)}<br>` +
         `chunk: ${Math.floor(p.pos[0] / 16)}, ${Math.floor(p.pos[2] / 16)}<br>` +
         `facing yaw ${(p.yaw * 180 / Math.PI).toFixed(0)}° pitch ${(p.pitch * 180 / Math.PI).toFixed(0)}°<br>` +

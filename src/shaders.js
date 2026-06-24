@@ -71,6 +71,46 @@ out vec4 fragColor;
 void main() { fragColor = u_color; }
 `;
 
+// Entity shader: colored boxes with a per-entity model matrix.
+export const ENTITY_VS = `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec3 a_color;
+uniform mat4 u_proj;
+uniform mat4 u_view;
+uniform mat4 u_model;
+out vec3 v_color;
+out float v_dist;
+void main() {
+  vec4 world = u_model * vec4(a_pos, 1.0);
+  vec4 viewPos = u_view * world;
+  v_dist = length(viewPos.xyz);
+  v_color = a_color;
+  gl_Position = u_proj * viewPos;
+}
+`;
+
+export const ENTITY_FS = `#version 300 es
+precision highp float;
+in vec3 v_color;
+in float v_dist;
+uniform float u_dayLight;
+uniform vec3 u_fogColor;
+uniform float u_fogStart;
+uniform float u_fogEnd;
+uniform float u_hurt;       // 0..1 red flash
+out vec4 fragColor;
+void main() {
+  float ambient = 0.30;
+  float light = ambient + (1.0 - ambient) * u_dayLight;
+  vec3 rgb = v_color * light;
+  rgb = mix(rgb, vec3(1.0, 0.2, 0.2), u_hurt);
+  float fog = clamp((v_dist - u_fogStart) / max(u_fogEnd - u_fogStart, 0.001), 0.0, 1.0);
+  rgb = mix(rgb, u_fogColor, fog);
+  fragColor = vec4(rgb, 1.0);
+}
+`;
+
 // Sky gradient (fullscreen) shader.
 export const SKY_VS = `#version 300 es
 precision highp float;

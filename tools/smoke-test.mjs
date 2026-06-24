@@ -256,5 +256,72 @@ const { serializeGame, applySave } = await import(S('persistence.js'));
   assert(game2.furnaces.get('1,2,3').input.id === ITEM_ID['raw_iron'], 'loaded furnace state restored');
 }
 
+console.log('\n== Entities (mobs) ==');
+const { Mob, MOBS, EntityManager, stepPhysics } = await import(S('entities.js'));
+let modelOk = true;
+for (const [t, def] of Object.entries(MOBS)) {
+  if (!(def.half > 0 && def.height > 0 && def.maxHealth > 0)) { modelOk = false; console.error('  bad def', t); }
+  for (const b of def.model) if (!(b.w > 0 && b.h > 0 && b.d > 0 && b.color && b.color.length === 3)) { modelOk = false; console.error('  bad box', t); }
+}
+assert(modelOk, `all ${Object.keys(MOBS).length} mob defs have valid AABB + box models`);
+let dropItemsOk = true;
+for (const def of Object.values(MOBS)) for (const d of (def.drops || [])) if (d.item && ITEM_ID[d.item] === undefined) { dropItemsOk = false; console.error('  unknown drop item', d.item); }
+assert(dropItemsOk, 'all mob drop items exist in the item registry');
+
+{ // mob gravity + landing
+  const w = new World(321);
+  for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) w.gen.generateTerrain(w.ensureChunk(cx, cz));
+  const sx = 3, sz = 3, sy = w.surfaceHeight(sx, sz);
+  const pig = new Mob('pig', sx + 0.5, sy + 6, sz + 0.5);
+  for (let i = 0; i < 300; i++) stepPhysics(w, pig, 1 / 60, pig.def.half, pig.def.height);
+  assert(pig.onGround && pig.pos[1] < sy + 6 && pig.pos[1] >= sy - 0.5, `pig falls and lands on ground (y=${pig.pos[1].toFixed(2)})`);
+}
+
+{ // flat-world spawn manager (deterministic ground)
+  const flat = { getBlock(x, y, z) { if (y < 64) return ID.stone; if (y === 64) return ID.grass_block; return AIR; } };
+  const em = new EntityManager(flat);
+  const playerStub = { pos: [0.5, 66, 0.5], inventory: new Inventory(), takeDamage() {} };
+  for (let i = 0; i < 240; i++) em.update(1 / 60, playerStub, { mode: 'survival' }, { dayLight: 1.0 });
+  assert(em.counts().passive > 0, `daytime spawns passive mobs on grass (${em.counts().passive})`);
+  assert(em.counts().hostile === 0, 'no hostile mobs in daylight');
+  for (let i = 0; i < 480; i++) em.update(1 / 60, playerStub, { mode: 'survival' }, { dayLight: 0.1 });
+  assert(em.counts().hostile > 0, `night spawns hostile mobs (${em.counts().hostile})`);
+  assert(em.mobs.length <= em.maxPassive + em.maxHostile, 'mob population respects caps');
+
+  // raycast vs mob
+  const z = new Mob('zombie', 5, 65, 0);
+  em.mobs = [z];
+  const rc = em.raycastMob([0, 65.9, 0], [1, 0, 0], 12);
+  assert(rc && rc.mob === z, 'raycastMob hits a mob directly ahead');
+  const miss = em.raycastMob([0, 65.9, 0], [0, 0, 1], 12);
+  assert(miss === null, 'raycastMob misses when mob is not in the ray path');
+}
+
+{ // death drops into inventory (survival)
+  const flat = { getBlock(x, y, z) { if (y < 64) return ID.stone; if (y === 64) return ID.grass_block; return AIR; } };
+  const em = new EntityManager(flat);
+  const pl = new Player(flat); pl.mode = 'survival';
+  const pig = new Mob('pig', 0.5, 65, 0.5); pig.dead = true;
+  em.mobs = [pig];
+  em.update(1 / 60, pl, { mode: 'survival' }, { dayLight: 1.0 });
+  assert(pl.inventory.countOf(ITEM_ID['porkchop']) >= 1, 'killed pig drops porkchop into inventory');
+  assert(!em.mobs.includes(pig), 'dead mob removed from manager');
+}
+
+{ // player melee kills a mob via raycast
+  const flat = { getBlock(x, y, z) { if (y < 64) return ID.stone; return AIR; }, raycast: () => ({ hit: false }) };
+  const pl = new Player(flat); pl.mode = 'survival';
+  pl.pos = [0.5, 65, 0.5]; pl.yaw = 0; pl.pitch = 0; // looking toward -Z
+  pl.inventory.add(ITEM_ID['diamond_sword'], 1); pl.selected = 0;
+  const em = new EntityManager(flat);
+  const zomb = new Mob('zombie', 0.5, 65, -2); // directly ahead (-Z), tall enough for a level look
+  em.mobs = [zomb];
+  const game = { entities: em, mode: 'survival' };
+  const inp = makeInput(); inp.clicked[0] = true;
+  const before = zomb.health;
+  pl._interact(1 / 60, inp, game);
+  assert(zomb.health < before, `melee with diamond sword reduced mob health (${before} -> ${zomb.health})`);
+}
+
 console.log('\n' + (failures === 0 ? '✅ ALL SMOKE TESTS PASSED' : `❌ ${failures} ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);

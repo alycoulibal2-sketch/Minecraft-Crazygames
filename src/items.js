@@ -80,6 +80,13 @@ def({ name: 'bread', icon: 'i_bread', food: 5, stack: 64 });
 def({ name: 'wheat', icon: 'i_wheat' });
 def({ name: 'cooked_porkchop', icon: 'i_cooked_porkchop', food: 8, stack: 64 });
 def({ name: 'porkchop', icon: 'i_porkchop', food: 3, stack: 64 });
+def({ name: 'leather', icon: 'i_leather' });
+def({ name: 'feather', icon: 'i_feather' });
+def({ name: 'mutton', icon: 'i_mutton', food: 2 });
+def({ name: 'cooked_mutton', icon: 'i_cooked_mutton', food: 6 });
+def({ name: 'chicken_meat', icon: 'i_chicken_meat', food: 2 });
+def({ name: 'cooked_chicken', icon: 'i_cooked_chicken', food: 6 });
+def({ name: 'rotten_flesh', icon: 'i_rotten_flesh', food: 4 });
 
 // 3) Tools: material x type. Names like 'iron_pickaxe'.
 const TOOL_TYPES = ['pickaxe', 'axe', 'shovel', 'sword', 'hoe'];

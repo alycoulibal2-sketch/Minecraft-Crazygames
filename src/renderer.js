@@ -2,10 +2,12 @@
 
 import { createProgram, createTextureFromCanvas, Mesh } from './glutil.js';
 import {
-  TERRAIN_VS, TERRAIN_FS, LINE_VS, LINE_FS, SKY_VS, SKY_FS,
+  TERRAIN_VS, TERRAIN_FS, LINE_VS, LINE_FS, SKY_VS, SKY_FS, ENTITY_VS, ENTITY_FS,
 } from './shaders.js';
 import { buildAtlas } from './textures.js';
 import { setUVLookup } from './chunk.js';
+import { MOBS } from './entities.js';
+import { mat4, modelMatrix } from './math.js';
 
 const LAYOUT = [
   { loc: 0, size: 3, offset: 0 },
@@ -13,12 +15,35 @@ const LAYOUT = [
   { loc: 2, size: 3, offset: 5 },
 ];
 
+// Build a colored cuboid (pos3 + color3 per vertex) into pos/idx arrays.
+// box: {x,y,z center (y from feet), w,h,d, color:[r,g,b 0..1]}
+function buildBox(pos, idx, box) {
+  const hw = box.w / 2, hh = box.h / 2, hd = box.d / 2;
+  const x0 = box.x - hw, x1 = box.x + hw, y0 = box.y - hh, y1 = box.y + hh, z0 = box.z - hd, z1 = box.z + hd;
+  const C = box.color;
+  const faces = [
+    { s: 1.00, v: [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]] }, // +Y top
+    { s: 0.50, v: [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]] }, // -Y bottom
+    { s: 0.80, v: [[x1, y1, z1], [x0, y1, z1], [x0, y0, z1], [x1, y0, z1]] }, // +Z
+    { s: 0.80, v: [[x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]] }, // -Z
+    { s: 0.65, v: [[x1, y1, z0], [x1, y1, z1], [x1, y0, z1], [x1, y0, z0]] }, // +X
+    { s: 0.65, v: [[x0, y1, z1], [x0, y1, z0], [x0, y0, z0], [x0, y0, z1]] }, // -X
+  ];
+  for (const f of faces) {
+    const base = pos.length / 6;
+    for (const vv of f.v) pos.push(vv[0], vv[1], vv[2], C[0] * f.s, C[1] * f.s, C[2] * f.s);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+}
+
 export class Renderer {
   constructor(gl) {
     this.gl = gl;
     this.terrain = createProgram(gl, TERRAIN_VS, TERRAIN_FS);
     this.line = createProgram(gl, LINE_VS, LINE_FS);
     this.sky = createProgram(gl, SKY_VS, SKY_FS);
+    this.entity = createProgram(gl, ENTITY_VS, ENTITY_FS);
+    this._modelMat = mat4();
 
     const atlas = buildAtlas();
     this.atlasTex = createTextureFromCanvas(gl, atlas.canvas);
@@ -29,6 +54,7 @@ export class Renderer {
     this.gpuChunks = new Map();
     this._initSky();
     this._initSelection();
+    this._initEntities();
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -67,6 +93,50 @@ export class Renderer {
     this.selCount = verts.length / 3;
   }
 
+  _initEntities() {
+    const gl = this.gl;
+    this.entityMeshes = {};
+    for (const [type, def] of Object.entries(MOBS)) {
+      const pos = [], idx = [];
+      for (const box of def.model) buildBox(pos, idx, box);
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      const vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+      const ebo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+      gl.bindVertexArray(null);
+      this.entityMeshes[type] = { vao, count: idx.length };
+    }
+  }
+
+  _drawEntities(entityManager, proj, view, env) {
+    if (!entityManager || entityManager.mobs.length === 0) return;
+    const gl = this.gl, e = this.entity;
+    gl.useProgram(e.program);
+    gl.uniformMatrix4fv(e.uniforms.u_proj, false, proj);
+    gl.uniformMatrix4fv(e.uniforms.u_view, false, view);
+    gl.uniform1f(e.uniforms.u_dayLight, env.dayLight);
+    gl.uniform3fv(e.uniforms.u_fogColor, env.fogColor);
+    gl.uniform1f(e.uniforms.u_fogStart, env.fogStart);
+    gl.uniform1f(e.uniforms.u_fogEnd, env.fogEnd);
+    gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    for (const m of entityManager.mobs) {
+      const mesh = this.entityMeshes[m.type];
+      if (!mesh) continue;
+      modelMatrix(this._modelMat, m.pos[0], m.pos[1], m.pos[2], m.yaw);
+      gl.uniformMatrix4fv(e.uniforms.u_model, false, this._modelMat);
+      gl.uniform1f(e.uniforms.u_hurt, m._hurtFlash > 0 ? 0.6 : 0.0);
+      gl.bindVertexArray(mesh.vao);
+      gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
+    }
+    gl.bindVertexArray(null);
+  }
+
   reconcile(world) {
     const gl = this.gl;
     for (const c of world.chunks.values()) {
@@ -97,7 +167,7 @@ export class Renderer {
     return mesh;
   }
 
-  render(world, camera, player, env) {
+  render(world, camera, player, env, entityManager) {
     const gl = this.gl;
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clearColor(env.fogColor[0], env.fogColor[1], env.fogColor[2], 1);
@@ -137,7 +207,12 @@ export class Renderer {
     gl.depthMask(true);
     for (const g of this.gpuChunks.values()) if (g.solid) g.solid.draw();
 
-    // transparent pass
+    // entities (opaque, between terrain and water) — this binds its own program
+    this._drawEntities(entityManager, proj, view, env);
+
+    // transparent pass — re-bind terrain program after the entity pass.
+    // (terrain's other uniforms persist per-program from earlier this frame.)
+    gl.useProgram(t.program);
     gl.uniform1f(t.uniforms.u_alphaTest, 0.0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
