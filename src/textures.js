@@ -2,6 +2,7 @@
 // No external/copyrighted assets: every tile is drawn from code into a canvas.
 
 import { TILE_NAMES } from './blocks.js';
+import { ITEM_ICON_NAMES } from './items.js';
 
 export const TILE = 16;        // pixels per tile
 export const ATLAS_COLS = 16;  // tiles per row (=> up to 256 tiles, 256x256 atlas)
@@ -212,6 +213,65 @@ GEN.sugar_cane = (t, r) => { for (let y = 0; y < TILE; y++) { t.px(7, y, 110, 18
 GEN.cactus_top = (t, r) => { noiseFill(t, [70, 140, 60], 10, r); blob(t, 8, 8, 3, [90, 160, 70], r); };
 GEN.cactus_side = (t, r) => { noiseFill(t, [60, 130, 55], 10, r); for (let x = 1; x < TILE; x += 5) for (let y = 0; y < TILE; y++) t.px(x, y, 40, 100, 40); };
 
+// ---- item icons (non-block items: i_*) ----
+function outlinePx(t, x, y, r, g, b) { t.px(x, y, r, g, b); }
+function ingot(t, r, col) {
+  // little metal bar
+  for (let y = 6; y <= 11; y++) for (let x = 3; x <= 12; x++) {
+    const n = (r() * 2 - 1) * 14; t.px(x + (y < 8 ? 1 : 0) - (y > 9 ? 1 : 0), y, cl(col[0] + n), cl(col[1] + n), cl(col[2] + n));
+  }
+  for (let x = 4; x <= 12; x++) t.px(x, 6, cl(col[0] + 40), cl(col[1] + 40), cl(col[2] + 40));
+}
+function gem(t, r, col) {
+  const pts = [[7, 3], [9, 3], [11, 6], [8, 13], [5, 6]];
+  for (let y = 3; y <= 13; y++) for (let x = 3; x <= 12; x++) {
+    // diamond/gem shape via bounding rhombus
+    const cx = 8, top = 4, bot = 12;
+    const w = (y <= 7) ? (y - 2) : (13 - y);
+    if (Math.abs(x - cx) <= w) { const n = (r() * 2 - 1) * 16; t.px(x, y, cl(col[0] + n), cl(col[1] + n), cl(col[2] + n)); }
+  }
+  t.px(7, 6, 255, 255, 255); t.px(8, 5, cl(col[0] + 70), cl(col[1] + 70), cl(col[2] + 70));
+}
+function nugget(t, r, col) { blob(t, 8, 9, 3, col, r); blob(t, 6, 6, 1, [cl(col[0] + 40), cl(col[1] + 40), cl(col[2] + 40)], r); }
+function toolIcon(t, r, headCol, type) {
+  const handle = [120, 85, 45];
+  // handle diagonal from (5,14) to (10,8)
+  for (let i = 0; i <= 8; i++) { const x = 5 + (i * 0.55) | 0, y = 14 - i; t.px(x, y, handle[0], handle[1], handle[2]); t.px(x + 1, y, cl(handle[0] - 20), cl(handle[1] - 20), cl(handle[2] - 20)); }
+  const hx = 9, hy = 5;
+  const H = (x, y) => { const n = (r() * 2 - 1) * 12; t.px(x, y, cl(headCol[0] + n), cl(headCol[1] + n), cl(headCol[2] + n)); };
+  if (type === 'pickaxe') { for (let x = 4; x <= 12; x++) H(x, 4); H(4, 5); H(12, 5); H(5, 5); H(11, 5); }
+  else if (type === 'axe') { for (let y = 3; y <= 7; y++) for (let x = 8; x <= 11 - Math.abs(y - 5); x++) H(x, y); }
+  else if (type === 'shovel') { for (let y = 3; y <= 6; y++) for (let x = 8; x <= 11; x++) H(x, y); }
+  else if (type === 'sword') { for (let i = 0; i <= 9; i++) { H(11 - i, 3 + i); } H(4, 11); H(6, 11); H(5, 10); H(5, 12); } // blade + guard
+  else if (type === 'hoe') { for (let x = 8; x <= 12; x++) H(x, 4); H(8, 5); H(9, 5); }
+}
+
+GEN.i_stick = (t, r) => { for (let i = 0; i <= 9; i++) { const x = 6 + ((i * 0.3) | 0), y = 13 - i; t.px(x, y, 140, 100, 55); t.px(x + 1, y, 110, 78, 42); } };
+GEN.i_coal = (t, r) => nugget(t, r, [40, 40, 42]);
+GEN.i_charcoal = (t, r) => nugget(t, r, [55, 45, 40]);
+GEN.i_raw_iron = (t, r) => nugget(t, r, [196, 160, 130]);
+GEN.i_raw_copper = (t, r) => nugget(t, r, [200, 120, 80]);
+GEN.i_raw_gold = (t, r) => nugget(t, r, [230, 190, 70]);
+GEN.i_iron_ingot = (t, r) => ingot(t, r, [220, 220, 225]);
+GEN.i_copper_ingot = (t, r) => ingot(t, r, [200, 120, 80]);
+GEN.i_gold_ingot = (t, r) => ingot(t, r, [245, 215, 90]);
+GEN.i_diamond = (t, r) => gem(t, r, [110, 235, 235]);
+GEN.i_emerald = (t, r) => gem(t, r, [50, 210, 110]);
+GEN.i_lapis = (t, r) => nugget(t, r, [40, 70, 200]);
+GEN.i_redstone = (t, r) => nugget(t, r, [210, 30, 30]);
+GEN.i_flint = (t, r) => { blob(t, 8, 9, 3, [60, 55, 55], r); t.px(6, 7, 110, 105, 105); };
+GEN.i_apple = (t, r) => { blob(t, 8, 9, 4, [210, 40, 40], r); for (let y = 3; y < 6; y++) t.px(8, y, 90, 60, 30); t.px(10, 4, 60, 160, 50); t.px(11, 5, 60, 160, 50); t.px(6, 7, 255, 180, 180); };
+GEN.i_bread = (t, r) => { for (let y = 6; y <= 11; y++) for (let x = 3; x <= 12; x++) { const n = (r() * 2 - 1) * 18; t.px(x, y, cl(190 + n), cl(140 + n), cl(70 + n)); } for (let x = 4; x <= 11; x += 2) t.px(x, 6, 150, 100, 50); };
+GEN.i_wheat = (t, r) => { for (let y = 3; y < TILE; y++) { t.px(7, y, 200, 180, 70); t.px(8, y, 180, 160, 60); } for (let y = 4; y < 12; y += 2) { t.px(6, y, 220, 200, 90); t.px(9, y, 220, 200, 90); } };
+GEN.i_porkchop = (t, r) => { blob(t, 8, 9, 4, [225, 150, 150], r); blob(t, 6, 7, 1, [255, 200, 200], r); t.px(11, 11, 240, 240, 240); };
+GEN.i_cooked_porkchop = (t, r) => { blob(t, 8, 9, 4, [170, 100, 60], r); blob(t, 6, 7, 1, [200, 140, 90], r); t.px(11, 11, 230, 220, 200); };
+{
+  const MATCOL = { wooden: [150, 110, 60], stone: [130, 130, 130], iron: [225, 225, 230], gold: [245, 215, 90], diamond: [110, 235, 235] };
+  for (const [mat, col] of Object.entries(MATCOL))
+    for (const type of ['pickaxe', 'axe', 'shovel', 'sword', 'hoe'])
+      GEN[`i_${mat}_${type}`] = (t, r) => toolIcon(t, r, col, type);
+}
+
 function missing(t) { for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) { const c = ((x >> 3) ^ (y >> 3)) & 1; t.px(x, y, c ? 240 : 20, 0, c ? 240 : 20); } }
 
 // Build the atlas canvas. Returns { canvas, uv: Map(name -> [u0,v0,u1,v1]) }.
@@ -223,7 +283,9 @@ export function buildAtlas() {
   ctx.clearRect(0, 0, size, size);
   const uv = new Map();
   const inset = 0.0; // NEAREST filtering; no inset needed for face-mapped tiles
-  TILE_NAMES.forEach((name, idx) => {
+  const ALL = [...TILE_NAMES, ...ITEM_ICON_NAMES];
+  if (ALL.length > ATLAS_COLS * ATLAS_COLS) console.warn('Atlas overflow:', ALL.length, 'tiles >', ATLAS_COLS * ATLAS_COLS);
+  ALL.forEach((name, idx) => {
     const col = idx % ATLAS_COLS, row = (idx / ATLAS_COLS) | 0;
     const tile = new Tile();
     const gen = GEN[name];

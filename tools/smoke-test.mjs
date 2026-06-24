@@ -33,7 +33,8 @@ console.log('\n== Texture atlas coverage ==');
 const atlas = buildAtlas();
 setUVLookup(atlas.uv);
 assert(warnCount === 0, `every tile (${TILE_NAMES.length}) has a generator (warns=${warnCount})`);
-assert(atlas.uv.size === TILE_NAMES.length, 'atlas uv map covers all tiles');
+assert(TILE_NAMES.every(n => atlas.uv.has(n)), 'atlas uv map covers all block tiles');
+assert(atlas.uv.size >= TILE_NAMES.length, `atlas has block tiles + item icons (${atlas.uv.size} total)`);
 
 console.log('\n== Block registry ==');
 assert(BLOCKS[0].name === 'air', 'block 0 is air');
@@ -108,6 +109,55 @@ try {
   }
 } catch (e) { crashed = e; }
 assert(!crashed, 'pipeline survives 150 frames of movement' + (crashed ? ': ' + crashed.message : ''));
+
+console.log('\n== Items + icons ==');
+const { ITEMS, ITEM_ID, ITEM_ICON_NAMES, breakSeconds, dropsWith, itemByName } = await import(S('items.js'));
+assert(ITEMS.length > 100, `item registry populated (${ITEMS.length} items)`);
+assert(ITEM_ID['oak_planks'] !== undefined && ITEM_ID['iron_pickaxe'] !== undefined, 'block-items and tools registered');
+let iconOk = true;
+for (const n of ITEM_ICON_NAMES) if (!atlas.uv.has(n)) { iconOk = false; console.error('   missing item icon in atlas:', n); }
+assert(iconOk, `all ${ITEM_ICON_NAMES.length} item icons present in atlas (no warns=${warnCount})`);
+const woodPick = itemByName('wooden_pickaxe');
+assert(breakSeconds(BLOCKS[ID.stone], woodPick) < breakSeconds(BLOCKS[ID.stone], null), 'pickaxe mines stone faster than hand');
+assert(breakSeconds(BLOCKS[ID.bedrock], woodPick) === Infinity, 'bedrock is unbreakable');
+assert(dropsWith(BLOCKS[ID.stone], woodPick) === true, 'wood pick drops stone');
+assert(dropsWith(BLOCKS[ID.diamond_ore], woodPick) === false, 'wood pick does NOT drop diamond ore');
+assert(dropsWith(BLOCKS[ID.diamond_ore], itemByName('iron_pickaxe')) === true, 'iron pick drops diamond ore');
+
+console.log('\n== Inventory ==');
+const { Inventory, INV_SIZE } = await import(S('inventory.js'));
+const inv = new Inventory();
+const left = inv.add(ITEM_ID['dirt'], 70);
+assert(left === 0, 'added 70 dirt across stacks (none left over)');
+assert(inv.countOf(ITEM_ID['dirt']) === 70, 'inventory reports 70 dirt');
+inv.remove(ITEM_ID['dirt'], 5);
+assert(inv.countOf(ITEM_ID['dirt']) === 65, 'removed 5 dirt -> 65');
+const overflow = inv.add(ITEM_ID['stone'], INV_SIZE * 64 + 100); // try to overflow
+assert(overflow > 0, 'overflow returns leftover when inventory full');
+
+console.log('\n== Crafting + smelting ==');
+const { matchRecipe, smeltResult } = await import(S('recipes.js'));
+// 1 oak log (shapeless, 2x2 grid) -> 4 oak planks
+const g2 = [ITEM_ID['oak_log'], 0, 0, 0];
+const rPlanks = matchRecipe(g2, 2);
+assert(rPlanks && rPlanks.out[0] === ITEM_ID['oak_planks'] && rPlanks.out[1] === 4, 'oak_log -> 4 oak_planks (shapeless)');
+// 2 planks vertical -> 4 sticks
+const gSticks = [ITEM_ID['oak_planks'], 0, ITEM_ID['oak_planks'], 0];
+const rSticks = matchRecipe(gSticks, 2);
+assert(rSticks && rSticks.out[0] === ITEM_ID['stick'], 'two oak_planks -> sticks (shaped, position-independent)');
+// crafting table 2x2 planks
+const gTable = [ITEM_ID['oak_planks'], ITEM_ID['oak_planks'], ITEM_ID['oak_planks'], ITEM_ID['oak_planks']];
+assert(matchRecipe(gTable, 2)?.out[0] === ITEM_ID['crafting_table'], '2x2 planks -> crafting_table');
+// wooden pickaxe on 3x3
+const P = ITEM_ID['oak_planks'], S2 = ITEM_ID['stick'];
+const gPick = [P, P, P, 0, S2, 0, 0, S2, 0];
+assert(matchRecipe(gPick, 3)?.out[0] === ITEM_ID['wooden_pickaxe'], 'planks+sticks -> wooden_pickaxe (3x3 shaped)');
+// same pattern shifted should NOT match in 2x2 (too big) and an empty grid matches nothing
+assert(matchRecipe([0, 0, 0, 0], 2) === null, 'empty grid -> no recipe');
+// smelting
+assert(smeltResult(ITEM_ID['raw_iron']) === ITEM_ID['iron_ingot'], 'raw_iron smelts to iron_ingot');
+assert(smeltResult(ITEM_ID['sand']) === ITEM_ID['glass'], 'sand smelts to glass');
+assert(smeltResult(ITEM_ID['dirt']) === null, 'dirt does not smelt');
 
 console.log('\n' + (failures === 0 ? '✅ ALL SMOKE TESTS PASSED' : `❌ ${failures} ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);
