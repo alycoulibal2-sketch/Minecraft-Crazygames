@@ -7,7 +7,12 @@ import { Player } from './player.js';
 import { Camera } from './camera.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
-import { DEFAULT_RENDER_DISTANCE } from './config.js';
+import { DEFAULT_RENDER_DISTANCE, PLAYER_EYE } from './config.js';
+import { WATER, ID } from './blocks.js';
+import { ITEMS } from './items.js';
+import { smeltResult } from './recipes.js';
+
+const SMELT_TIME = 5;   // seconds to smelt one item
 
 const DAY_LENGTH = 600; // seconds for a full day-night cycle
 
@@ -28,6 +33,9 @@ export class Game {
     this.mode = 'creative';
     this.fps = 60;
     this._acc = 0; this._frames = 0; this._fpsTimer = 0;
+    this._regenTimer = 0; this._starveTimer = 0; this._airTimer = 0; this._deathTimer = 0;
+    this.furnaces = new Map();   // "x,y,z" -> furnace state
+    this.spawnPoint = [0.5, 80, 0.5];
 
     this._spawn();
     this._resize();
@@ -52,6 +60,7 @@ export class Game {
       }
     const sy = this.world.surfaceHeight(0, 0);
     this.player.pos = [0.5, sy + 1.0, 0.5];
+    this.spawnPoint = [0.5, sy + 1.0, 0.5];
     this.player.flying = true;
   }
 
@@ -69,8 +78,110 @@ export class Game {
     this.player.setMode(this.mode);
   }
 
-  onBreak(id, x, y, z) { /* survival drops hook */ }
+  onBreak(id, x, y, z) {
+    // remove furnace state if a furnace was broken; small movement exhaustion
+    if (id === ID.furnace) this.furnaces.delete(x + ',' + y + ',' + z);
+  }
   onPlace(id) { /* survival inventory hook */ }
+
+  // ---- functional block UI ----
+  openBlockUI(type, hit) {
+    if (type === 'furnace') {
+      const key = hit.x + ',' + hit.y + ',' + hit.z;
+      let f = this.furnaces.get(key);
+      if (!f) { f = { input: null, fuel: null, output: null, burn: 0, burnMax: 0, progress: 0 }; this.furnaces.set(key, f); }
+      this.ui.openContainer('furnace', { hit, furnace: f });
+    } else {
+      this.ui.openContainer('crafting', { hit });
+    }
+  }
+
+  _respawn() {
+    const p = this.player;
+    p.health = p.maxHealth; p.hunger = p.maxHunger; p.saturation = 5; p.exhaustion = 0;
+    p.air = p.maxAir; p.dead = false; p._peakY = null;
+    p.vel = [0, 0, 0];
+    const sx = Math.floor(this.spawnPoint[0]), sz = Math.floor(this.spawnPoint[2]);
+    const sy = this.world.surfaceHeight(sx, sz);
+    p.pos = [sx + 0.5, sy + 0.5, sz + 0.5];
+  }
+
+  _survivalTick(dt) {
+    const p = this.player;
+    if (p.mode !== 'survival') return;
+    if (p.dead) {
+      this._deathTimer += dt;
+      if (this.ui.invOpen) this.ui.closeScreen();
+      if (this._deathTimer >= 1.2) { this._respawn(); this._deathTimer = 0; }
+      return;
+    }
+
+    // passive exhaustion + sprint cost
+    p.exhaustion += dt * 0.015;
+    const v = Math.hypot(p.vel[0], p.vel[2]);
+    if (!p.flying && v > 5.5) p.exhaustion += dt * 0.03;
+
+    // exhaustion -> saturation -> hunger
+    while (p.exhaustion >= 4) {
+      p.exhaustion -= 4;
+      if (p.saturation > 0) p.saturation = Math.max(0, p.saturation - 1);
+      else p.hunger = Math.max(0, p.hunger - 1);
+    }
+
+    // regen / starvation
+    if (p.hunger >= 18 && p.health < p.maxHealth && p.saturation > 0) {
+      this._regenTimer += dt;
+      if (this._regenTimer >= 3.5) { p.heal(1); p.exhaustion += 0.6; this._regenTimer = 0; }
+    } else if (p.hunger <= 0) {
+      this._starveTimer += dt;
+      if (this._starveTimer >= 4) { p.takeDamage(1); this._starveTimer = 0; }
+    } else { this._regenTimer = 0; this._starveTimer = 0; }
+
+    // drowning
+    const ex = Math.floor(p.pos[0]), ey = Math.floor(p.pos[1] + PLAYER_EYE), ez = Math.floor(p.pos[2]);
+    if (this.world.getBlock(ex, ey, ez) === WATER) {
+      p.air -= dt * 20;
+      if (p.air <= 0) { this._airTimer += dt; if (this._airTimer >= 1) { p.takeDamage(2); this._airTimer = 0; } }
+    } else { p.air = p.maxAir; this._airTimer = 0; }
+
+    // lava / fire contact damage (feet in lava)
+    if (this.world.getBlock(Math.floor(p.pos[0]), Math.floor(p.pos[1] + 0.1), Math.floor(p.pos[2])) === ID.lava) {
+      p.takeDamage(dt * 4);
+    }
+  }
+
+  _tickFurnaces(dt) {
+    for (const f of this.furnaces.values()) {
+      const inItem = f.input;
+      const smeltId = inItem ? smeltResult(inItem.id) : null;
+      const canSmelt = !!smeltId && (!f.output || (f.output.id === smeltId && f.output.count < 64));
+
+      if (f.burn > 0) f.burn = Math.max(0, f.burn - dt);
+
+      // light the furnace if idle, smeltable input present, and fuel available
+      if (f.burn <= 0 && canSmelt && f.fuel && f.fuel.count > 0) {
+        const fuelItem = ITEMS[f.fuel.id];
+        if (fuelItem && fuelItem.fuel > 0) {
+          f.burnMax = fuelItem.fuel * SMELT_TIME;
+          f.burn = f.burnMax;
+          f.fuel.count -= 1;
+          if (f.fuel.count <= 0) f.fuel = null;
+        }
+      }
+
+      if (f.burn > 0 && canSmelt) {
+        f.progress += dt;
+        if (f.progress >= SMELT_TIME) {
+          f.progress = 0;
+          inItem.count -= 1;
+          if (inItem.count <= 0) f.input = null;
+          if (f.output) f.output.count += 1; else f.output = { id: smeltId, count: 1 };
+        }
+      } else {
+        f.progress = 0;
+      }
+    }
+  }
 
   _globalKeys() {
     const input = this.input;
@@ -110,10 +221,12 @@ export class Game {
 
     if (!this.timePaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
 
+    this.player.mode = this.mode;
     if (!this.ui.invOpen) {
-      this.player.mode = this.mode;
       this.player.update(dt, this.input, this);
     }
+    this._survivalTick(dt);
+    this._tickFurnaces(dt);
     this.ui.setHint(!this.input.locked && !this.ui.invOpen);
 
     this.world.update(this.player.pos[0], this.player.pos[2], this.renderDistance);

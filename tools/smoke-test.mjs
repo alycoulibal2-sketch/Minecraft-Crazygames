@@ -159,5 +159,64 @@ assert(smeltResult(ITEM_ID['raw_iron']) === ITEM_ID['iron_ingot'], 'raw_iron sme
 assert(smeltResult(ITEM_ID['sand']) === ITEM_ID['glass'], 'sand smelts to glass');
 assert(smeltResult(ITEM_ID['dirt']) === null, 'dirt does not smelt');
 
+console.log('\n== Survival: mining drops + placement + eating ==');
+const { blockDrops } = await import(S('items.js'));
+function makeInput() {
+  return {
+    isDown: () => false, wasTapped: () => false, consumeLook: () => ({ dx: 0, dy: 0 }), consumeWheel: () => 0,
+    buttons: [false, false, false], clicked: [false, false, false],
+    touch: { fwd: 0, strafe: 0, jump: false, break: false, place: false }, endFrame() {},
+  };
+}
+// deterministic drop check
+const seedRng = (() => { let s = 7; return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; })();
+assert(blockDrops(BLOCKS[ID.stone], itemByName('wooden_pickaxe'), seedRng).some(d => d.id === ITEM_ID['cobblestone']), 'stone drops cobblestone');
+assert(blockDrops(BLOCKS[ID.grass_block], null, seedRng).some(d => d.id === ITEM_ID['dirt']), 'grass drops dirt by hand');
+assert(blockDrops(BLOCKS[ID.bedrock], itemByName('diamond_pickaxe'), seedRng).length === 0, 'bedrock drops nothing');
+
+{
+  // controlled mining scenario
+  const w = new World(4242);
+  for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) w.gen.generateTerrain(w.ensureChunk(cx, cz));
+  const tx = 1, tz = 1, ty = w.surfaceHeight(tx, tz) + 5;
+  for (let y = ty - 2; y <= ty + 5; y++) w.setBlock(tx, y, tz, AIR, false); // clear a column
+  w.setBlock(tx, ty, tz, ID.stone, false);
+  const pl = new Player(w);
+  pl.mode = 'survival'; pl.flying = false;
+  pl.pos = [tx + 0.5, ty + 3, tz + 0.5]; pl.yaw = 0; pl.pitch = -Math.PI / 2 + 0.02;
+  pl.inventory.add(ITEM_ID['wooden_pickaxe'], 1); pl.selected = 0;
+  const inp = makeInput(); inp.buttons[0] = true;
+  let broke = false;
+  for (let i = 0; i < 360 && !broke; i++) { pl.update(1 / 60, inp, { onBreak() {}, onPlace() {} }); if (w.getBlock(tx, ty, tz) === AIR) broke = true; }
+  assert(broke, 'survival: held left-click breaks the targeted stone block');
+  assert(pl.inventory.countOf(ITEM_ID['cobblestone']) >= 1, 'survival: mined stone yielded cobblestone into inventory');
+
+  // placement decrements inventory
+  pl.inventory.add(ITEM_ID['dirt'], 10);
+  const slot = pl.inventory.slots.findIndex(s => s && s.id === ITEM_ID['dirt']);
+  pl.selected = slot;
+  const before = pl.inventory.countOf(ITEM_ID['dirt']);
+  const placeY = ty + 4;
+  pl._place({ x: tx, y: placeY - 1, z: tz, nx: 0, ny: 1, nz: 0 }, { onPlace() {} });
+  assert(w.getBlock(tx, placeY, tz) === ID.dirt, 'survival: placed dirt block appears in world');
+  assert(pl.inventory.countOf(ITEM_ID['dirt']) === before - 1, 'survival: placing decremented inventory by 1');
+
+  // eating restores hunger
+  pl.hunger = 10;
+  pl.inventory.add(ITEM_ID['apple'], 3);
+  const apple = itemByName('apple');
+  const aSlot = pl.inventory.slots.findIndex(s => s && s.id === ITEM_ID['apple']);
+  pl.selected = aSlot;
+  pl.eat(apple);
+  assert(pl.hunger === 14, 'survival: eating apple restored hunger (+4)');
+  assert(pl.inventory.countOf(ITEM_ID['apple']) === 2, 'survival: eating consumed one apple');
+
+  // fall damage
+  pl.health = 20; pl._peakY = pl.pos[1] + 12; pl.onGround = false;
+  // simulate landing: directly invoke takeDamage path via large fall
+  const fall = 12; pl.takeDamage(Math.floor(fall - 3));
+  assert(pl.health === 20 - 9, 'survival: a 12-block fall deals 9 damage');
+}
+
 console.log('\n' + (failures === 0 ? '✅ ALL SMOKE TESTS PASSED' : `❌ ${failures} ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);

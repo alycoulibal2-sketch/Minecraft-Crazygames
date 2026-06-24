@@ -6,6 +6,8 @@ import {
 } from './config.js';
 import { dirFromYawPitch } from './math.js';
 import { AIR, BLOCKS, ID, WATER } from './blocks.js';
+import { Inventory } from './inventory.js';
+import { ITEMS, ITEM_ID, breakSeconds, blockDrops } from './items.js';
 
 const EPS = 1e-3;
 const SENS = 0.0022;
@@ -21,12 +23,37 @@ export class Player {
     this.onGround = false;
     this.inWater = false;
     this.selected = 0;
+    // Creative palette hotbar (block ids). Survival uses `inventory` slots 0-8.
     this.hotbar = [ID.grass_block, ID.dirt, ID.stone, ID.cobblestone, ID.oak_planks, ID.oak_log, ID.glass, ID.glowstone, ID.sand];
+    this.inventory = new Inventory();
     this.target = { hit: false };
     this._lastSpace = -1;
     this.health = 20; this.maxHealth = 20;
     this.hunger = 20; this.maxHunger = 20;
-    this.breakTarget = null; this.breakTime = 0;
+    this.saturation = 5; this.exhaustion = 0;
+    this.breakTarget = null; this.breakTime = 0; this.breakProgress = 0;
+    this.air = 300; this.maxAir = 300;
+    this.dead = false;
+    this._peakY = null;
+  }
+
+  // ---- held item helpers (survival reads inventory; creative reads palette) ----
+  heldStack() { return this.mode === 'survival' ? this.inventory.slots[this.selected] : null; }
+  heldItem() { const s = this.heldStack(); return s ? ITEMS[s.id] : null; }
+  heldBlockId() {
+    if (this.mode === 'creative') return this.hotbar[this.selected];
+    const it = this.heldItem();
+    return it && it.block ? it.block : AIR;
+  }
+  heldTool() { const it = this.heldItem(); return it && it.tool ? it : null; }
+
+  giveDrops(drops) { for (const d of drops) this.inventory.add(d.id, d.count); }
+  damageTool() {
+    const s = this.heldStack(); if (!s) return;
+    const it = ITEMS[s.id];
+    if (!it || !it.tool || !it.durability) return;
+    s.dmg = (s.dmg || 0) + 1;
+    if (s.dmg >= it.durability) this.inventory.decrement(this.selected, 1);
   }
 
   setMode(mode) {
@@ -110,10 +137,24 @@ export class Player {
       this.onGround = false;
       return;
     }
+    const wasGround = this.onGround;
     this.onGround = false;
     this._moveAxis(0, this.vel[0] * dt);
     this._moveAxis(2, this.vel[2] * dt);
     this._moveAxis(1, this.vel[1] * dt);
+
+    // ---- fall damage ----
+    if (this.flying || this.inWater) {
+      this._peakY = this.pos[1];
+    } else if (!this.onGround) {
+      if (this._peakY === null || this.pos[1] > this._peakY) this._peakY = this.pos[1];
+    } else {
+      if (this._peakY !== null && !wasGround) {
+        const fall = this._peakY - this.pos[1];
+        if (fall > 3.5) this.takeDamage(Math.floor(fall - 3));
+      }
+      this._peakY = this.pos[1];
+    }
   }
 
   _moveAxis(axis, d) {
@@ -163,43 +204,86 @@ export class Player {
     const dir = dirFromYawPitch(this.yaw, this.pitch);
     const hit = this.world.raycast(eye, dir, REACH);
     this.target = hit;
+    if (this.mode === 'spectator') { this.breakTarget = null; this.breakProgress = 0; return; }
+    const sneak = input.isDown('ShiftLeft');
 
-    // break
+    // ---- break (left held) ----
     if (hit.hit && (input.buttons[0] || input.touch.break)) {
       const b = BLOCKS[hit.id];
       const tk = hit.x + ',' + hit.y + ',' + hit.z;
-      if (b.hardness < 0) { this.breakTarget = null; }  // unbreakable
+      if (b.hardness < 0) { this.breakTarget = null; this.breakProgress = 0; }  // unbreakable
       else if (this.mode === 'creative') {
-        this._break(hit, game);
+        this._break(hit, game, false);
       } else {
-        // survival: accumulate break time
         if (this.breakTarget !== tk) { this.breakTarget = tk; this.breakTime = 0; }
         this.breakTime += dt;
-        const needed = Math.max(0.05, b.hardness * 1.2);
+        const needed = breakSeconds(b, this.heldTool());
         this.breakProgress = Math.min(1, this.breakTime / needed);
-        if (this.breakTime >= needed) { this._break(hit, game); this.breakTarget = null; this.breakProgress = 0; }
+        if (this.breakTime >= needed) {
+          this._break(hit, game, true);
+          this.damageTool();
+          this.exhaustion += 0.005;
+          this.breakTarget = null; this.breakProgress = 0; this.breakTime = 0;
+        }
       }
     } else {
       this.breakTarget = null; this.breakProgress = 0;
     }
 
-    // place / pick (single click)
+    // ---- use / place (right click) ----
     if (hit.hit && input.clicked[2]) {
-      const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
-      const id = this.hotbar[this.selected];
-      const existing = this.world.getBlock(px, py, pz);
-      const replaceable = existing === AIR || existing === WATER || (BLOCKS[existing].isCross);
-      if (id && id !== AIR && replaceable && !(BLOCKS[id].solid && this.blockIntersectsPlayer(px, py, pz))) {
-        this.world.setBlock(px, py, pz, id);
-        if (game) game.onPlace?.(id);
+      const tgt = BLOCKS[hit.id];
+      // open functional block UIs (unless sneaking, which forces placement)
+      if (!sneak && game && (hit.id === ID.crafting_table || hit.id === ID.furnace)) {
+        game.openBlockUI(hit.id === ID.crafting_table ? 'crafting' : 'furnace', hit);
+      } else {
+        const held = this.heldItem();
+        if (held && held.food > 0 && this.hunger < this.maxHunger && this.mode === 'survival') {
+          this.eat(held);
+        } else {
+          this._place(hit, game);
+        }
       }
     }
-    if (hit.hit && input.clicked[1]) { this.hotbar[this.selected] = hit.id; } // middle: pick
+    // middle click: pick block into hand
+    if (hit.hit && input.clicked[1]) {
+      if (this.mode === 'creative') this.hotbar[this.selected] = hit.id;
+      else { const it = ITEM_ID[BLOCKS[hit.id].name]; if (it && this.inventory.has(it)) {/* already have */} }
+    }
   }
 
-  _break(hit, game) {
+  _place(hit, game) {
+    const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
+    const id = this.heldBlockId();
+    if (!id || id === AIR) return;
+    const existing = this.world.getBlock(px, py, pz);
+    const replaceable = existing === AIR || existing === WATER || BLOCKS[existing].isCross;
+    if (!replaceable) return;
+    if (BLOCKS[id].solid && this.blockIntersectsPlayer(px, py, pz)) return;
+    this.world.setBlock(px, py, pz, id);
+    if (this.mode === 'survival') this.inventory.decrement(this.selected, 1);
+    if (game) game.onPlace?.(id);
+  }
+
+  eat(item) {
+    this.hunger = Math.min(this.maxHunger, this.hunger + item.food);
+    this.saturation = Math.min(this.hunger, this.saturation + item.food * 0.6);
+    this.inventory.decrement(this.selected, 1);
+  }
+
+  _break(hit, game, survival) {
     const id = hit.id;
+    const block = BLOCKS[id];
     this.world.setBlock(hit.x, hit.y, hit.z, AIR);
+    if (survival) this.giveDrops(blockDrops(block, this.heldTool()));
     if (game) game.onBreak?.(id, hit.x, hit.y, hit.z);
   }
+
+  // ---- damage / death ----
+  takeDamage(amount) {
+    if (this.mode !== 'survival') return;
+    this.health = Math.max(0, this.health - amount);
+    if (this.health <= 0) this.dead = true;
+  }
+  heal(amount) { this.health = Math.min(this.maxHealth, this.health + amount); }
 }

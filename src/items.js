@@ -111,6 +111,31 @@ export function breakSeconds(block, toolItem) {
   return Math.max(0.05, base / speed);
 }
 
+// Resolve what a broken block drops as item stacks: [{id,count}, ...].
+// rng() in [0,1) controls random drops (pass a seeded rng in tests).
+const RAW_ORE = { iron_ore: 'raw_iron', gold_ore: 'raw_gold', copper_ore: 'raw_copper' };
+const ORE_GEM = { coal_ore: 'coal', diamond_ore: 'diamond', emerald_ore: 'emerald' };
+export function blockDrops(block, toolItem, rng = Math.random) {
+  if (block.hardness < 0) return [];            // unbreakable (bedrock/liquids)
+  if (!dropsWith(block, toolItem)) return [];   // wrong tool tier -> nothing
+  const name = block.name;
+  if (RAW_ORE[name]) return mk(RAW_ORE[name], 1);
+  if (ORE_GEM[name]) return mk(ORE_GEM[name], 1);
+  if (name === 'redstone_ore') return mk('redstone', 4 + ((rng() * 2) | 0));
+  if (name === 'lapis_ore') return mk('lapis_lazuli', 4 + ((rng() * 5) | 0));
+  if (name.endsWith('_leaves')) {
+    const out = [];
+    if (name === 'oak_leaves' && rng() < 0.06) out.push(...mk('oak_sapling', 1));
+    if (rng() < 0.04) out.push(...mk('stick', 1));
+    return out;
+  }
+  if (name === 'gravel') return rng() < 0.1 ? mk('flint', 1) : mk('gravel', 1);
+  // short grass / flowers / saplings drop themselves (so they can be replanted)
+  const dropName = (block.drop && ITEM_ID[block.drop] !== undefined) ? block.drop : name;
+  return mk(dropName, 1);
+}
+function mk(name, count) { const id = ITEM_ID[name]; return id ? [{ id, count }] : []; }
+
 // Whether a broken block yields its drop (needs right tool tier for ores/stone).
 export function dropsWith(block, toolItem) {
   // blocks requiring a pickaxe drop nothing without one of sufficient tier

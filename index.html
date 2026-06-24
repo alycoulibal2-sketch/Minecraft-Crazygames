@@ -16,16 +16,22 @@
 
   #hotbar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
     display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.35); border: 2px solid rgba(0,0,0,0.5); border-radius: 6px; }
-  .slot { width: 52px; height: 52px; background: rgba(255,255,255,0.08); border: 2px solid rgba(0,0,0,0.4);
+  .slot { position: relative; width: 52px; height: 52px; background: rgba(255,255,255,0.08); border: 2px solid rgba(0,0,0,0.4);
     border-radius: 4px; display: flex; align-items: center; justify-content: center; image-rendering: pixelated; }
+  #hotbar .slot { width: 52px; height: 52px; }
   .slot.selected { border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 8px rgba(255,255,255,0.5); }
   .slot canvas { image-rendering: pixelated; }
+  .slot .count { position: absolute; right: 2px; bottom: 0; font: bold 13px/1 monospace; color: #fff;
+    text-shadow: 1px 1px 0 #000, -1px 1px 0 #000; pointer-events: none; }
+  .slot .durability { position: absolute; left: 3px; right: 3px; bottom: 2px; height: 3px; background: #000; }
+  .slot .durability div { height: 100%; }
 
   #bars { position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%);
-    display: none; flex-direction: column; gap: 2px; align-items: center; }
-  .bar { font-size: 16px; letter-spacing: 1px; text-shadow: 0 0 3px #000; }
-  .health { color: #ff4444; }
-  .hunger { color: #c8923c; }
+    display: none; flex-direction: column; gap: 1px; align-items: center; }
+  .bar { font-size: 15px; letter-spacing: 0px; text-shadow: 0 0 3px #000, 1px 1px 0 #000; }
+  .bar .hp { color: #ff3b3b; } .bar .hp-empty { color: #5a1414; }
+  .bar .hg { } .bar .hg-empty { color: #5a4a20; }
+  .bar.air { color: #cdeeff; }
 
   #debug { position: absolute; left: 8px; top: 8px; color: #fff; background: rgba(0,0,0,0.5);
     padding: 8px 10px; border-radius: 4px; font: 12px/1.5 monospace; white-space: nowrap; }
@@ -34,15 +40,30 @@
     color: #fff; background: rgba(0,0,0,0.6); padding: 14px 22px; border-radius: 8px; text-align: center;
     font-size: 15px; max-width: 80vw; line-height: 1.5; }
 
-  #inventory { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.55); pointer-events: auto; }
-  #inv-panel { background: #c6c6c6; border: 4px solid #555; border-radius: 6px; padding: 16px;
-    max-width: 80vw; max-height: 80vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
-  #inv-title { font-size: 14px; color: #222; margin-bottom: 10px; font-weight: 600; }
-  #inv-grid { display: grid; grid-template-columns: repeat(10, 46px); gap: 3px; }
-  .inv-cell { width: 46px; height: 46px; background: #8b8b8b; border: 2px solid #373737;
-    display: flex; align-items: center; justify-content: center; cursor: pointer; image-rendering: pixelated; }
-  .inv-cell:hover { background: #fff; }
+  #death { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(140,0,0,0.45); color: #fff; text-align: center; }
+  #death h1 { font-size: 46px; margin-bottom: 8px; text-shadow: 2px 2px 0 #000; }
+
+  #screen { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 20; }
+  .panel { background: #c6c6c6; border: 4px solid #555; border-radius: 6px; padding: 14px 16px;
+    max-width: 92vw; max-height: 88vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+  .panel-title { font-size: 14px; color: #222; margin-bottom: 10px; font-weight: 700; }
+  .grid { display: grid; gap: 3px; }
+  #screen .slot { width: 46px; height: 46px; background: #8b8b8b; border: 2px solid #373737; border-radius: 0; cursor: pointer; }
+  #screen .slot:hover { background: #a8a8a8; }
+  #screen .slot.small { width: 42px; height: 42px; }
+  .craft-section, .furnace-section { display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
+    padding-bottom: 12px; border-bottom: 2px solid #999; }
+  .furnace-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .arrow { font-size: 26px; color: #555; }
+  .flame { font-size: 18px; } .flame::before { content: '🔥'; }
+  .inv-section { margin-top: 6px; }
+  .hotbar-row { padding-top: 4px; border-top: 2px solid #999; }
+  #cursor-item { position: fixed; z-index: 40; width: 40px; height: 40px; pointer-events: none;
+    transform: translate(-20px, -20px); image-rendering: pixelated; }
+  #cursor-item .count { position: absolute; right: 0; bottom: -2px; font: bold 13px/1 monospace; color: #fff;
+    text-shadow: 1px 1px 0 #000; }
 
   #loading { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
     align-items: center; justify-content: center; background: #1a1a2e; color: #fff; text-align: center; padding: 20px; }
