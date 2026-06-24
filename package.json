@@ -1,0 +1,12 @@
+{
+  "name": "minecraft-crazygames",
+  "version": "0.1.0",
+  "description": "A from-scratch voxel sandbox game (Minecraft-like) for the browser, built on WebGL2 with zero dependencies.",
+  "type": "module",
+  "scripts": {
+    "serve": "node tools/serve.js",
+    "test": "node tools/smoke-test.mjs"
+  },
+  "license": "MIT",
+  "private": true
+}

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Minecraft Crazygames</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb;
+    font-family: 'Segoe UI', system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+  #game { display: block; width: 100vw; height: 100vh; cursor: crosshair; image-rendering: pixelated; }
+  #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+
+  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    color: #fff; font-size: 26px; line-height: 1; mix-blend-mode: difference; text-shadow: 0 0 2px #000; }
+
+  #hotbar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.35); border: 2px solid rgba(0,0,0,0.5); border-radius: 6px; }
+  .slot { width: 52px; height: 52px; background: rgba(255,255,255,0.08); border: 2px solid rgba(0,0,0,0.4);
+    border-radius: 4px; display: flex; align-items: center; justify-content: center; image-rendering: pixelated; }
+  .slot.selected { border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 8px rgba(255,255,255,0.5); }
+  .slot canvas { image-rendering: pixelated; }
+
+  #bars { position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%);
+    display: none; flex-direction: column; gap: 2px; align-items: center; }
+  .bar { font-size: 16px; letter-spacing: 1px; text-shadow: 0 0 3px #000; }
+  .health { color: #ff4444; }
+  .hunger { color: #c8923c; }
+
+  #debug { position: absolute; left: 8px; top: 8px; color: #fff; background: rgba(0,0,0,0.5);
+    padding: 8px 10px; border-radius: 4px; font: 12px/1.5 monospace; white-space: nowrap; }
+
+  #hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    color: #fff; background: rgba(0,0,0,0.6); padding: 14px 22px; border-radius: 8px; text-align: center;
+    font-size: 15px; max-width: 80vw; line-height: 1.5; }
+
+  #inventory { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55); pointer-events: auto; }
+  #inv-panel { background: #c6c6c6; border: 4px solid #555; border-radius: 6px; padding: 16px;
+    max-width: 80vw; max-height: 80vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+  #inv-title { font-size: 14px; color: #222; margin-bottom: 10px; font-weight: 600; }
+  #inv-grid { display: grid; grid-template-columns: repeat(10, 46px); gap: 3px; }
+  .inv-cell { width: 46px; height: 46px; background: #8b8b8b; border: 2px solid #373737;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; image-rendering: pixelated; }
+  .inv-cell:hover { background: #fff; }
+
+  #loading { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: #1a1a2e; color: #fff; text-align: center; padding: 20px; }
+  #loading h1 { font-size: 28px; margin-bottom: 10px; }
+  #loading p { opacity: 0.8; max-width: 540px; line-height: 1.5; }
+  .spinner { width: 42px; height: 42px; border: 4px solid rgba(255,255,255,0.2); border-top-color: #fff;
+    border-radius: 50%; animation: spin 0.9s linear infinite; margin-bottom: 18px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="ui"></div>
+  <div id="loading">
+    <div class="spinner"></div>
+    <h1>Minecraft Crazygames</h1>
+    <p>Generating world… click the screen once it loads to lock the mouse and play.</p>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
