@@ -15,6 +15,8 @@ export class UI {
     this.atlasUV = atlasUV;
     this.player = player;
     this._hotbarSig = null;
+    this.isTouch = (typeof window !== 'undefined' && 'ontouchstart' in window) ||
+                   (typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0);
     this.screen = null;          // null | 'inventory' | 'crafting' | 'furnace' | 'creative'
     this.invOpen = false;        // any blocking screen open
     this.cursor = null;          // {id,count} held by mouse
@@ -332,7 +334,7 @@ export class UI {
     } else { this.cursorEl.style.display = 'none'; this.cursorEl.innerHTML = ''; }
   }
 
-  setHint(show) { this.hintEl.style.display = show ? 'block' : 'none'; }
+  setHint(show) { this.hintEl.style.display = (show && !this.isTouch) ? 'block' : 'none'; }
   toggleDebug() { this.debugEl.style.display = this.debugEl.style.display === 'none' ? 'block' : 'none'; }
   flashSaved() {
     this.toastEl.textContent = '✓ Saved';

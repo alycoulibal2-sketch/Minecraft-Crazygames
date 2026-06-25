@@ -8,9 +8,11 @@ import { Camera } from './camera.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { DEFAULT_RENDER_DISTANCE, PLAYER_EYE } from './config.js';
-import { WATER, ID } from './blocks.js';
+import { WATER, ID, BLOCKS, AIR } from './blocks.js';
 import { ITEMS } from './items.js';
 import { smeltResult } from './recipes.js';
+import { Audio } from './audio.js';
+import { TouchControls } from './touch.js';
 import { CHUNK_X, CHUNK_Z } from './config.js';
 import { save, load, applySave } from './persistence.js';
 import { EntityManager } from './entities.js';
@@ -45,6 +47,9 @@ export class Game {
     this.furnaces = new Map();   // "x,y,z" -> furnace state
     this.spawnPoint = [0.5, 80, 0.5];
     this._autosaveTimer = 0;
+    this.audio = new Audio();
+    this.touch = new TouchControls(this.input, this);
+    this._prevHealth = 20; this._prevHunger = 20; this._wasInWater = false;
 
     this._spawn();
     if (saved) {
@@ -100,10 +105,29 @@ export class Game {
   }
 
   onBreak(id, x, y, z) {
-    // remove furnace state if a furnace was broken; small movement exhaustion
     if (id === ID.furnace) this.furnaces.delete(x + ',' + y + ',' + z);
+    this.audio.break(BLOCKS[id]?.name);
   }
-  onPlace(id) { /* survival inventory hook */ }
+  onPlace(id) { this.audio.place(BLOCKS[id]?.name); }
+
+  _audioTick(dt) {
+    const p = this.player;
+    this.audio.ensure();
+    if (p.health < this._prevHealth - 0.01) this.audio.hurt();
+    if (p.hunger > this._prevHunger + 0.01) this.audio.eat();
+    this._prevHealth = p.health; this._prevHunger = p.hunger;
+    // footsteps
+    if (p.onGround && !p.flying) {
+      const v = Math.hypot(p.vel[0], p.vel[2]);
+      if (v > 1.0) {
+        const id = this.world.getBlock(Math.floor(p.pos[0]), Math.floor(p.pos[1] - 0.1), Math.floor(p.pos[2]));
+        if (id !== AIR) this.audio.step(BLOCKS[id]?.name);
+      }
+    }
+    // splash on entering water
+    if (p.inWater && !this._wasInWater) this.audio.splash();
+    this._wasInWater = p.inWater;
+  }
 
   // ---- functional block UI ----
   openBlockUI(type, hit) {
@@ -244,6 +268,7 @@ export class Game {
     if (!this.timePaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
 
     const env = this._env();
+    this.touch.update();
     this.player.mode = this.mode;
     if (!this.ui.invOpen) {
       this.player.update(dt, this.input, this);
@@ -251,6 +276,7 @@ export class Game {
     this._survivalTick(dt);
     this._tickFurnaces(dt);
     this.entities.update(dt, this.player, this, env);
+    this._audioTick(dt);
     this.ui.setHint(!this.input.locked && !this.ui.invOpen);
 
     this.world.update(this.player.pos[0], this.player.pos[2], this.renderDistance);

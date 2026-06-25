@@ -216,6 +216,7 @@ export class Player {
         const it = this.heldItem();
         const dmg = this.mode === 'creative' ? 1000 : (it && it.attack ? it.attack : 1);
         mobHit.mob.hurt(dmg, this.yaw);
+        if (game.audio) game.audio.mobHurt();
         if (this.mode === 'survival') { this.damageTool(); this.exhaustion += 0.1; }
       }
     } else if (hit.hit && (input.buttons[0] || input.touch.break)) {
