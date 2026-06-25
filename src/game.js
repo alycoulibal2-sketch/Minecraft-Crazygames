@@ -125,7 +125,7 @@ export class Game {
     this.camera.perspective = s.perspective;
     this.input.sensitivity = s.sensitivity;
     this.input.invertY = s.invertY;
-    if (this.audio) this.audio.setVolume(s.volume);
+    if (this.audio) { this.audio.setVolume(s.volume); this.audio.setMusicVolume(s.musicVolume); }
   }
 
   saveNow() { if (save(this)) this.ui.flashSaved?.(); }
@@ -313,7 +313,7 @@ export class Game {
 
     // open the pause menu when pointer lock is lost (some browsers swallow the
     // Escape keydown that exits pointer lock, so we detect the lock transition).
-    if (this._wasLocked && !this.input.locked && !this.ui.invOpen) this.ui.openPause();
+    if (this._wasLocked && !this.input.locked && !this.ui.invOpen && !this.player.dead) this.ui.openPause();
     this._wasLocked = this.input.locked;
 
     // live camera / control settings

@@ -288,7 +288,16 @@ export class Player {
     const id = hit.id;
     const block = BLOCKS[id];
     this.world.setBlock(hit.x, hit.y, hit.z, AIR);
-    if (survival) this.giveDrops(blockDrops(block, this.heldTool()));
+    if (survival) {
+      const drops = blockDrops(block, this.heldTool());
+      // drop as walk-over item entities; fall back to direct inventory when there's
+      // no entity manager (e.g. headless tests).
+      if (game && game.entities && game.entities.spawnDrops) {
+        game.entities.spawnDrops(drops, hit.x + 0.5, hit.y + 0.55, hit.z + 0.5);
+      } else {
+        this.giveDrops(drops);
+      }
+    }
     if (game) game.onBreak?.(id, hit.x, hit.y, hit.z);
   }
 

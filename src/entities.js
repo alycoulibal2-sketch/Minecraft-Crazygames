@@ -215,15 +215,34 @@ function approachAngle(cur, target, t) {
 
 // ---------- manager ----------
 const PASSIVE = ['pig', 'cow', 'sheep', 'chicken'];
+const ITEM_HALF = 0.125, ITEM_H = 0.25, ITEM_PICKUP = 1.4, ITEM_MAGNET = 2.2, ITEM_TTL = 300, MAX_ITEMS = 220;
+
 export class EntityManager {
   constructor(world) {
     this.world = world;
     this.mobs = [];
+    this.items = [];           // dropped item entities {pos,vel,id,count,age,pickupDelay,...}
     this._spawnTimer = 0;
     this.maxPassive = 18;
     this.maxHostile = 16;
     this.spawnRadius = 44;
   }
+
+  // Spawn a dropped item entity at (x,y,z). Merges into a nearby same-id stack
+  // to keep the entity count down. scatter gives it a little pop when it appears.
+  spawnItem(x, y, z, id, count, scatter = true) {
+    if (!id || count <= 0) return;
+    for (const it of this.items) {
+      if (it.id === id && Math.abs(it.pos[0] - x) < 0.7 && Math.abs(it.pos[1] - y) < 0.7 && Math.abs(it.pos[2] - z) < 0.7) {
+        it.count += count; return;
+      }
+    }
+    if (this.items.length >= MAX_ITEMS) this.items.shift();
+    const v = scatter ? [(Math.random() - 0.5) * 2, 2 + Math.random() * 1.2, (Math.random() - 0.5) * 2] : [0, 1, 0];
+    this.items.push({ pos: [x, y, z], vel: v, id, count, age: 0, pickupDelay: 0.5, onGround: false, blockedHoriz: false });
+  }
+
+  spawnDrops(drops, x, y, z) { if (drops) for (const d of drops) this.spawnItem(x, y, z, d.id, d.count); }
 
   update(dt, player, game, env) {
     const world = this.world;
@@ -243,12 +262,50 @@ export class EntityManager {
     }
     this.mobs = keep;
 
+    // dropped item entities: physics, magnet toward player, walk-over pickup
+    this._updateItems(dt, player, game);
+
     // spawning
     this._spawnTimer -= dt;
     if (this._spawnTimer <= 0) {
       this._spawnTimer = 2.5;
       this._trySpawn(player, env, peaceful);
     }
+  }
+
+  _updateItems(dt, player, game) {
+    if (this.items.length === 0) return;
+    const world = this.world;
+    const survival = game && game.mode === 'survival' && player.inventory;
+    const kept = [];
+    for (const it of this.items) {
+      it.age += dt;
+      if (it.pickupDelay > 0) it.pickupDelay -= dt;
+      stepPhysics(world, it, dt, ITEM_HALF, ITEM_H);
+      if (it.onGround) { it.vel[0] *= 0.6; it.vel[2] *= 0.6; }
+
+      const dx = player.pos[0] - it.pos[0];
+      const dy = (player.pos[1] + 0.7) - it.pos[1];
+      const dz = player.pos[2] - it.pos[2];
+      const dist = Math.hypot(dx, dy, dz);
+      if (survival && it.pickupDelay <= 0 && dist < ITEM_MAGNET) {
+        // glide toward the player (kinematic, like MC's pickup) so it reliably
+        // lifts grounded drops up to the player instead of fighting gravity.
+        const k = Math.min(1, dt * 9);
+        it.pos[0] += dx * k; it.pos[1] += dy * k; it.pos[2] += dz * k;
+        it.vel[0] = it.vel[1] = it.vel[2] = 0;
+        if (dist < ITEM_PICKUP) {
+          const left = player.inventory.add(it.id, it.count);
+          if (left < it.count && game.audio && game.audio.pickup) game.audio.pickup();
+          it.count = left;
+          if (it.count <= 0) continue;       // fully collected -> remove
+        }
+      }
+      if (it.age > ITEM_TTL || it.pos[1] < -16) continue;
+      if (Math.hypot(it.pos[0] - player.pos[0], it.pos[2] - player.pos[2]) > this.spawnRadius + 40) continue;
+      kept.push(it);
+    }
+    this.items = kept;
   }
 
   counts() {
@@ -258,12 +315,12 @@ export class EntityManager {
   }
 
   _onDeath(m, player, game) {
-    if (game && game.mode === 'survival' && player.inventory) {
+    if (game && game.mode === 'survival') {
       for (const d of m.def.drops || []) {
         if (Math.random() <= d.chance) {
           const n = d.min + Math.floor(Math.random() * (d.max - d.min + 1));
           const itemId = ITEM_ID[d.item];
-          if (itemId && n > 0) player.inventory.add(itemId, n);
+          if (itemId && n > 0) this.spawnItem(m.pos[0], m.pos[1] + 0.4, m.pos[2], itemId, n);
         }
       }
     }

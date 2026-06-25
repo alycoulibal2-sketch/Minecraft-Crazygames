@@ -143,16 +143,28 @@ __modules["audio.js"] = function(__exports, __require){
 class Audio {
   constructor() {
     this.ctx = null;
-    this.master = null;
+    this.master = null;       // SFX bus
+    this.musicGain = null;    // music bus (independent volume)
     this.enabled = true;
     this._lastStep = 0;
-    this.volume = 0.5;   // 0..1 (mapped to a safe gain ceiling)
+    this.volume = 0.5;        // SFX 0..1
+    this.musicVolume = 0.4;   // music 0..1
+    this._musicOn = false;
+    this._musicTimer = null;
+    this._nextNote = 0;
   }
 
-  // Set master volume (0..1). Applied immediately if the context exists.
+  // Set SFX volume (0..1). Applied immediately if the context exists.
   setVolume(v) {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.master) this.master.gain.value = this.volume * 0.7;
+  }
+
+  // Set music volume (0..1); starts/stops the generative music accordingly.
+  setMusicVolume(v) {
+    this.musicVolume = Math.max(0, Math.min(1, v));
+    if (this.musicGain) this.musicGain.gain.value = this.musicVolume * 0.18;
+    if (this._ok()) { if (this.musicVolume > 0) this._startMusic(); else this._stopMusic(); }
   }
 
   // Create/resume the context — must be called from a user gesture.
@@ -166,8 +178,12 @@ class Audio {
         this.master = this.ctx.createGain();
         this.master.gain.value = this.volume * 0.7;
         this.master.connect(this.ctx.destination);
+        this.musicGain = this.ctx.createGain();
+        this.musicGain.gain.value = this.musicVolume * 0.18;
+        this.musicGain.connect(this.ctx.destination);
       }
       if (this.ctx.state === 'suspended') this.ctx.resume();
+      if (this.musicVolume > 0) this._startMusic();
     } catch (e) { this.enabled = false; }
   }
 
@@ -255,7 +271,50 @@ class Audio {
   eat() { if (!this._ok()) return; for (let i = 0; i < 3; i++) setTimeout(() => this._tone('triangle', 200 + Math.random() * 120, 0.06, 0.16), i * 80); }
   splash() { if (!this._ok()) return; const n = this._noise(0.2); const f = this.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1200; n.connect(f); this._env(f, 0.25, 0.005, 0.2, this.master); n.start(); n.stop(this._t + 0.25); }
   click() { this._tone('square', 440, 0.04, 0.12); }
+  pickup() { if (!this._ok()) return; this._tone('triangle', 700, 0.05, 0.12); setTimeout(() => this._tone('triangle', 1050, 0.05, 0.09), 45); }
+  levelup() { if (!this._ok()) return; [523, 659, 784].forEach((f, i) => setTimeout(() => this._tone('triangle', f, 0.14, 0.14), i * 90)); }
+
+  // ----- original generative ambient music (NOT Minecraft's copyrighted music) -----
+  // Sparse, calm pentatonic notes with soft pad envelopes, scheduled with lookahead.
+  _startMusic() {
+    if (!this._ok() || this._musicOn || this.musicVolume <= 0) return;
+    this._musicOn = true;
+    this._nextNote = this._t + 0.3;
+    this._musicTimer = setInterval(() => this._musicTick(), 250);
+  }
+  _stopMusic() {
+    this._musicOn = false;
+    if (this._musicTimer) { clearInterval(this._musicTimer); this._musicTimer = null; }
+  }
+  _musicTick() {
+    if (!this._ok() || !this._musicOn) { this._stopMusic(); return; }
+    const horizon = this._t + 1.5;
+    while (this._nextNote < horizon) {
+      this._musicNote(this._nextNote);
+      this._nextNote += 0.42 + Math.random() * 0.55;   // spacing between notes
+    }
+  }
+  _musicNote(time) {
+    if (Math.random() < 0.18) return;                  // occasional rest
+    const f = MUSIC_SCALE[(Math.random() * MUSIC_SCALE.length) | 0];
+    this._musicVoice(f, time, 0.9 + Math.random() * 0.8, 0.12);
+    if (Math.random() < 0.22) this._musicVoice(f * 1.5, time + 0.03, 1.2, 0.05);  // soft harmony
+    if (Math.random() < 0.14) this._musicVoice(f / 2, time, 1.6, 0.09);            // low pad
+  }
+  _musicVoice(freq, time, dur, gain) {
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle'; o.frequency.value = freq;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(gain, time + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    o.connect(g); g.connect(this.musicGain);
+    o.start(time); o.stop(time + dur + 0.05);
+  }
 }
+
+// C major pentatonic across ~2 octaves (Hz) — a calm, neutral palette.
+const MUSIC_SCALE = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];
 
 __exports.Audio = Audio;
 
@@ -949,15 +1008,34 @@ function approachAngle(cur, target, t) {
 
 // ---------- manager ----------
 const PASSIVE = ['pig', 'cow', 'sheep', 'chicken'];
+const ITEM_HALF = 0.125, ITEM_H = 0.25, ITEM_PICKUP = 1.4, ITEM_MAGNET = 2.2, ITEM_TTL = 300, MAX_ITEMS = 220;
+
 class EntityManager {
   constructor(world) {
     this.world = world;
     this.mobs = [];
+    this.items = [];           // dropped item entities {pos,vel,id,count,age,pickupDelay,...}
     this._spawnTimer = 0;
     this.maxPassive = 18;
     this.maxHostile = 16;
     this.spawnRadius = 44;
   }
+
+  // Spawn a dropped item entity at (x,y,z). Merges into a nearby same-id stack
+  // to keep the entity count down. scatter gives it a little pop when it appears.
+  spawnItem(x, y, z, id, count, scatter = true) {
+    if (!id || count <= 0) return;
+    for (const it of this.items) {
+      if (it.id === id && Math.abs(it.pos[0] - x) < 0.7 && Math.abs(it.pos[1] - y) < 0.7 && Math.abs(it.pos[2] - z) < 0.7) {
+        it.count += count; return;
+      }
+    }
+    if (this.items.length >= MAX_ITEMS) this.items.shift();
+    const v = scatter ? [(Math.random() - 0.5) * 2, 2 + Math.random() * 1.2, (Math.random() - 0.5) * 2] : [0, 1, 0];
+    this.items.push({ pos: [x, y, z], vel: v, id, count, age: 0, pickupDelay: 0.5, onGround: false, blockedHoriz: false });
+  }
+
+  spawnDrops(drops, x, y, z) { if (drops) for (const d of drops) this.spawnItem(x, y, z, d.id, d.count); }
 
   update(dt, player, game, env) {
     const world = this.world;
@@ -977,12 +1055,50 @@ class EntityManager {
     }
     this.mobs = keep;
 
+    // dropped item entities: physics, magnet toward player, walk-over pickup
+    this._updateItems(dt, player, game);
+
     // spawning
     this._spawnTimer -= dt;
     if (this._spawnTimer <= 0) {
       this._spawnTimer = 2.5;
       this._trySpawn(player, env, peaceful);
     }
+  }
+
+  _updateItems(dt, player, game) {
+    if (this.items.length === 0) return;
+    const world = this.world;
+    const survival = game && game.mode === 'survival' && player.inventory;
+    const kept = [];
+    for (const it of this.items) {
+      it.age += dt;
+      if (it.pickupDelay > 0) it.pickupDelay -= dt;
+      stepPhysics(world, it, dt, ITEM_HALF, ITEM_H);
+      if (it.onGround) { it.vel[0] *= 0.6; it.vel[2] *= 0.6; }
+
+      const dx = player.pos[0] - it.pos[0];
+      const dy = (player.pos[1] + 0.7) - it.pos[1];
+      const dz = player.pos[2] - it.pos[2];
+      const dist = Math.hypot(dx, dy, dz);
+      if (survival && it.pickupDelay <= 0 && dist < ITEM_MAGNET) {
+        // glide toward the player (kinematic, like MC's pickup) so it reliably
+        // lifts grounded drops up to the player instead of fighting gravity.
+        const k = Math.min(1, dt * 9);
+        it.pos[0] += dx * k; it.pos[1] += dy * k; it.pos[2] += dz * k;
+        it.vel[0] = it.vel[1] = it.vel[2] = 0;
+        if (dist < ITEM_PICKUP) {
+          const left = player.inventory.add(it.id, it.count);
+          if (left < it.count && game.audio && game.audio.pickup) game.audio.pickup();
+          it.count = left;
+          if (it.count <= 0) continue;       // fully collected -> remove
+        }
+      }
+      if (it.age > ITEM_TTL || it.pos[1] < -16) continue;
+      if (Math.hypot(it.pos[0] - player.pos[0], it.pos[2] - player.pos[2]) > this.spawnRadius + 40) continue;
+      kept.push(it);
+    }
+    this.items = kept;
   }
 
   counts() {
@@ -992,12 +1108,12 @@ class EntityManager {
   }
 
   _onDeath(m, player, game) {
-    if (game && game.mode === 'survival' && player.inventory) {
+    if (game && game.mode === 'survival') {
       for (const d of m.def.drops || []) {
         if (Math.random() <= d.chance) {
           const n = d.min + Math.floor(Math.random() * (d.max - d.min + 1));
           const itemId = ITEM_ID[d.item];
-          if (itemId && n > 0) player.inventory.add(itemId, n);
+          if (itemId && n > 0) this.spawnItem(m.pos[0], m.pos[1] + 0.4, m.pos[2], itemId, n);
         }
       }
     }
@@ -1200,7 +1316,7 @@ class Game {
     this.camera.perspective = s.perspective;
     this.input.sensitivity = s.sensitivity;
     this.input.invertY = s.invertY;
-    if (this.audio) this.audio.setVolume(s.volume);
+    if (this.audio) { this.audio.setVolume(s.volume); this.audio.setMusicVolume(s.musicVolume); }
   }
 
   saveNow() { if (save(this)) this.ui.flashSaved?.(); }
@@ -1388,7 +1504,7 @@ class Game {
 
     // open the pause menu when pointer lock is lost (some browsers swallow the
     // Escape keydown that exits pointer lock, so we detect the lock transition).
-    if (this._wasLocked && !this.input.locked && !this.ui.invOpen) this.ui.openPause();
+    if (this._wasLocked && !this.input.locked && !this.ui.invOpen && !this.player.dead) this.ui.openPause();
     this._wasLocked = this.input.locked;
 
     // live camera / control settings
@@ -1670,6 +1786,19 @@ class Inventory {
       }
     }
     return count;
+  }
+
+  // Add a whole stack object, preserving its dmg (tool durability). Damaged tools
+  // are placed into an empty slot as-is (they don't stack); everything else uses
+  // the normal merge-and-fill add(). Returns the count that did NOT fit.
+  addStack(stack) {
+    if (!stack || !stack.id) return 0;
+    if (stack.dmg) {
+      const i = this.firstEmpty();
+      if (i >= 0) { this.slots[i] = { id: stack.id, count: stack.count, dmg: stack.dmg }; return 0; }
+      return stack.count;
+    }
+    return this.add(stack.id, stack.count);
   }
 
   // Remove up to `count` of id; returns number actually removed.
@@ -2556,7 +2685,16 @@ class Player {
     const id = hit.id;
     const block = BLOCKS[id];
     this.world.setBlock(hit.x, hit.y, hit.z, AIR);
-    if (survival) this.giveDrops(blockDrops(block, this.heldTool()));
+    if (survival) {
+      const drops = blockDrops(block, this.heldTool());
+      // drop as walk-over item entities; fall back to direct inventory when there's
+      // no entity manager (e.g. headless tests).
+      if (game && game.entities && game.entities.spawnDrops) {
+        game.entities.spawnDrops(drops, hit.x + 0.5, hit.y + 0.55, hit.z + 0.5);
+      } else {
+        this.giveDrops(drops);
+      }
+    }
     if (game) game.onBreak?.(id, hit.x, hit.y, hit.z);
   }
 
@@ -2712,10 +2850,11 @@ __modules["renderer.js"] = function(__exports, __require){
 // renderer.js — WebGL2 renderer: sky, chunk meshes (opaque + transparent), block selection.
 
 const { createProgram, createTextureFromCanvas, Mesh } = __require('glutil.js');
-const { TERRAIN_VS, TERRAIN_FS, LINE_VS, LINE_FS, SKY_VS, SKY_FS, ENTITY_VS, ENTITY_FS } = __require('shaders.js');
-const { buildAtlas } = __require('textures.js');
+const { TERRAIN_VS, TERRAIN_FS, LINE_VS, LINE_FS, SKY_VS, SKY_FS, ENTITY_VS, ENTITY_FS, ITEM_VS, ITEM_FS } = __require('shaders.js');
+const { buildAtlas, ATLAS_COLS } = __require('textures.js');
 const { setUVLookup } = __require('chunk.js');
 const { MOBS } = __require('entities.js');
+const { ITEMS } = __require('items.js');
 const { mat4, modelMatrix } = __require('math.js');
 
 const LAYOUT = [
@@ -2763,7 +2902,9 @@ class Renderer {
     this.line = createProgram(gl, LINE_VS, LINE_FS);
     this.sky = createProgram(gl, SKY_VS, SKY_FS);
     this.entity = createProgram(gl, ENTITY_VS, ENTITY_FS);
+    this.itemProg = createProgram(gl, ITEM_VS, ITEM_FS);
     this._modelMat = mat4();
+    this._itemUV = new Map();   // itemId -> [u, v] atlas top-left (lazy)
 
     const atlas = buildAtlas();
     this.atlasTex = createTextureFromCanvas(gl, atlas.canvas);
@@ -2775,6 +2916,7 @@ class Renderer {
     this._initSky();
     this._initSelection();
     this._initEntities();
+    this._initItems();
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -2849,6 +2991,63 @@ class Renderer {
       gl.bindVertexArray(null);
       this.playerMesh = { vao, count: idx.length };
     }
+  }
+
+  _initItems() {
+    const gl = this.gl;
+    this.itemVao = gl.createVertexArray();
+    gl.bindVertexArray(this.itemVao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    // two triangles, a_quad in -0.5..0.5
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5,
+    ]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+
+  _uvForItem(id) {
+    let uv = this._itemUV.get(id);
+    if (uv === undefined) {
+      const it = ITEMS[id];
+      uv = (it && this.atlasUV.get(it.icon)) || null;
+      this._itemUV.set(id, uv);
+    }
+    return uv;
+  }
+
+  _drawItems(entityManager, proj, view, env) {
+    if (!entityManager || !entityManager.items || entityManager.items.length === 0) return;
+    const gl = this.gl, p = this.itemProg;
+    gl.useProgram(p.program);
+    gl.uniformMatrix4fv(p.uniforms.u_proj, false, proj);
+    gl.uniformMatrix4fv(p.uniforms.u_view, false, view);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
+    gl.uniform1i(p.uniforms.u_atlas, 0);
+    gl.uniform1f(p.uniforms.u_dayLight, env.dayLight);
+    gl.uniform1f(p.uniforms.u_brightness, env.brightness == null ? 0.5 : env.brightness);
+    gl.uniform3fv(p.uniforms.u_fogColor, env.fogColor);
+    gl.uniform1f(p.uniforms.u_fogStart, env.fogStart);
+    gl.uniform1f(p.uniforms.u_fogEnd, env.fogEnd);
+    // camera right/up in world space (rows of the view rotation)
+    gl.uniform3f(p.uniforms.u_right, view[0], view[4], view[8]);
+    gl.uniform3f(p.uniforms.u_up, view[1], view[5], view[9]);
+    gl.uniform1f(p.uniforms.u_uvSize, 1 / ATLAS_COLS);
+    gl.uniform1f(p.uniforms.u_size, 0.42);
+    gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.bindVertexArray(this.itemVao);
+    for (const it of entityManager.items) {
+      const uv = this._uvForItem(it.id);
+      if (!uv) continue;
+      const bob = Math.sin(it.age * 3) * 0.08 + 0.28;
+      gl.uniform3f(p.uniforms.u_center, it.pos[0], it.pos[1] + bob, it.pos[2]);
+      gl.uniform2f(p.uniforms.u_uvBase, uv[0], uv[1]);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    gl.bindVertexArray(null);
   }
 
   // bind entity program + set the per-frame common uniforms; returns the program.
@@ -2966,6 +3165,8 @@ class Renderer {
     this._drawEntities(entityManager, proj, view, env);
     // player body in 3rd person
     if (camera.perspective !== 0) this._drawPlayerBody(player, proj, view, env);
+    // dropped items (billboards)
+    this._drawItems(entityManager, proj, view, env);
 
     // transparent pass — re-bind terrain program after the entity pass.
     // (terrain's other uniforms persist per-program from earlier this frame.)
@@ -3009,7 +3210,8 @@ const SETTINGS_DEFAULTS = {
   invertY: false,
   renderDistance: 6,    // chunks, 3..16
   brightness: 0.5,      // 0..1 (0.5 = neutral / current look)
-  volume: 0.5,          // 0..1 master audio
+  volume: 0.5,          // 0..1 master SFX
+  musicVolume: 0.4,     // 0..1 background music
   sprintFov: true,      // dynamic FOV boost while sprinting
   perspective: 0,       // 0 = first person, 1 = third (behind), 2 = third (front)
   pauseTimeInMenu: true,// freeze day/night while a menu is open
@@ -3018,7 +3220,7 @@ const SETTINGS_DEFAULTS = {
 
 const RANGES = {
   fov: [30, 110], sensitivity: [0.2, 3.0], renderDistance: [3, 16],
-  brightness: [0, 1], volume: [0, 1],
+  brightness: [0, 1], volume: [0, 1], musicVolume: [0, 1],
 };
 
 class Settings {
@@ -3209,6 +3411,52 @@ void main() {
 }
 `;
 
+// Dropped-item shader: a camera-facing billboard quad sampling the atlas icon.
+const ITEM_VS = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 a_quad;   // -0.5..0.5
+uniform mat4 u_proj;
+uniform mat4 u_view;
+uniform vec3 u_center;
+uniform vec3 u_right;
+uniform vec3 u_up;
+uniform float u_size;
+uniform vec2 u_uvBase;
+uniform float u_uvSize;
+out vec2 v_uv;
+out float v_dist;
+void main() {
+  vec3 world = u_center + (u_right * a_quad.x + u_up * a_quad.y) * u_size;
+  vec4 viewPos = u_view * vec4(world, 1.0);
+  v_dist = length(viewPos.xyz);
+  v_uv = u_uvBase + vec2(a_quad.x + 0.5, 0.5 - a_quad.y) * u_uvSize;
+  gl_Position = u_proj * viewPos;
+}
+`;
+
+const ITEM_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+in float v_dist;
+uniform sampler2D u_atlas;
+uniform float u_dayLight;
+uniform float u_brightness;
+uniform vec3 u_fogColor;
+uniform float u_fogStart;
+uniform float u_fogEnd;
+out vec4 fragColor;
+void main() {
+  vec4 tex = texture(u_atlas, v_uv);
+  if (tex.a < 0.5) discard;
+  float ambient = clamp(0.35 + (u_brightness - 0.5) * 0.5, 0.1, 0.7);
+  float light = ambient + (1.0 - ambient) * u_dayLight;
+  vec3 rgb = tex.rgb * light;
+  float fog = clamp((v_dist - u_fogStart) / max(u_fogEnd - u_fogStart, 0.001), 0.0, 1.0);
+  rgb = mix(rgb, u_fogColor, fog);
+  fragColor = vec4(rgb, 1.0);
+}
+`;
+
 __exports.TERRAIN_VS = TERRAIN_VS;
 __exports.TERRAIN_FS = TERRAIN_FS;
 __exports.LINE_VS = LINE_VS;
@@ -3217,6 +3465,8 @@ __exports.ENTITY_VS = ENTITY_VS;
 __exports.ENTITY_FS = ENTITY_FS;
 __exports.SKY_VS = SKY_VS;
 __exports.SKY_FS = SKY_FS;
+__exports.ITEM_VS = ITEM_VS;
+__exports.ITEM_FS = ITEM_FS;
 
 };
 __modules["textures.js"] = function(__exports, __require){
@@ -3875,7 +4125,8 @@ class UI {
     panel.appendChild(this._toggleRow('Invert Y-axis', 'invertY'));
     panel.appendChild(this._rangeRow('Render Distance', 'renderDistance', 3, 16, 1, (v) => Math.round(v) + ' chunks'));
     panel.appendChild(this._rangeRow('Brightness', 'brightness', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
-    panel.appendChild(this._rangeRow('Master Volume', 'volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._rangeRow('Sound Volume', 'volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._rangeRow('Music Volume', 'musicVolume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
     panel.appendChild(this._toggleRow('Sprint FOV Effect', 'sprintFov'));
     panel.appendChild(this._toggleRow('Pause Time in Menu', 'pauseTimeInMenu'));
 
@@ -3897,14 +4148,14 @@ class UI {
   }
 
   closeScreen() {
-    // return crafting-grid + cursor items to inventory
+    // return crafting-grid + cursor items to inventory (addStack preserves tool dmg)
     if (this.screen === 'inventory' || this.screen === 'crafting') {
       for (let i = 0; i < this.craftGrid.length; i++) {
         const s = this.craftGrid[i];
-        if (s) { this.player.inventory.add(s.id, s.count); this.craftGrid[i] = null; }
+        if (s) { this.player.inventory.addStack(s); this.craftGrid[i] = null; }
       }
     }
-    if (this.cursor) { this.player.inventory.add(this.cursor.id, this.cursor.count); this.cursor = null; }
+    if (this.cursor) { this.player.inventory.addStack(this.cursor); this.cursor = null; }
     this.cursorEl.style.display = 'none';
     this.screen = null; this.invOpen = false; this.furnace = null;
     this.screenEl.style.display = 'none';
@@ -4003,16 +4254,29 @@ class UI {
   // ---- a clickable slot bound to (store, index) ----
   _slot(store, index, type) {
     const slot = el('div', { class: 'slot' });
-    slot._store = store; slot._index = index; slot._type = type;
+    slot._store = store; slot._index = index; slot._type = type; slot._sig = null;
     this._refreshSlot(slot);
-    slot.addEventListener('click', (e) => { e.preventDefault(); this._onSlotClick(slot, false); });
-    slot.addEventListener('contextmenu', (e) => { e.preventDefault(); this._onSlotClick(slot, true); });
+    // Use mousedown (not click): the HUD rebuilds slot contents each frame, which
+    // can detach the click target between press and release and swallow the 'click'
+    // event entirely (right-click still worked because contextmenu fires on press).
+    // mousedown fires on press for BOTH buttons. Left = move/merge, right = take half.
+    slot.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 && e.button !== 2) return;
+      e.preventDefault(); e.stopPropagation();
+      this._onSlotClick(slot, e.button === 2);
+    });
+    slot.addEventListener('contextmenu', (e) => e.preventDefault());
     if (!this._slotEls) this._slotEls = [];
     this._slotEls.push(slot);
     return slot;
   }
   _refreshSlot(slot) {
     const stack = slot._store.get(slot._index);
+    // change-detection: only rebuild the slot's DOM when its contents changed,
+    // so the per-frame HUD update doesn't continually detach child nodes.
+    const sig = stack && stack.id ? stack.id + 'x' + stack.count + 'd' + (stack.dmg || 0) : '_';
+    if (sig === slot._sig) return;
+    slot._sig = sig;
     slot.innerHTML = '';
     if (stack && stack.id) {
       const ic = this.iconForItem(stack.id, 40); if (ic) slot.appendChild(ic);
@@ -4042,7 +4306,7 @@ class UI {
           slotStack.count -= half; if (slotStack.count <= 0) store.set(index, null);
         }
       } else {
-        if (!slotStack) { store.set(index, { id: this.cursor.id, count: 1 }); this.cursor.count -= 1; }
+        if (!slotStack) { store.set(index, { id: this.cursor.id, count: 1, dmg: this.cursor.dmg }); this.cursor.count -= 1; }
         else if (slotStack.id === this.cursor.id && slotStack.count < this.maxStack(slotStack.id)) { slotStack.count += 1; this.cursor.count -= 1; }
         if (this.cursor.count <= 0) this.cursor = null;
       }

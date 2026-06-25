@@ -91,5 +91,13 @@ try {
 } catch (e) { err = e; }
 assert(!err, 'bundled pause/options menus + 3rd-person run without throwing' + (err ? ': ' + err.stack : ''));
 
+err = null;
+try {
+  const p = game.player;
+  game.entities.spawnItem(p.pos[0] + 1.2, p.pos[1], p.pos[2], 2, 4);
+  for (let i = 0; i < 20; i++) game._loop(6200 + i * 16);
+} catch (e) { err = e; }
+assert(!err, 'bundled dropped items spawn + render without throwing' + (err ? ': ' + err.stack : ''));
+
 console.log('\n' + (failures === 0 ? '✅ STANDALONE TEST PASSED (single-file boots + runs headlessly)' : `❌ ${failures} STANDALONE ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);

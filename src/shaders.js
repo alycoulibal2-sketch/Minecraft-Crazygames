@@ -136,3 +136,49 @@ void main() {
   fragColor = vec4(c, 1.0);
 }
 `;
+
+// Dropped-item shader: a camera-facing billboard quad sampling the atlas icon.
+export const ITEM_VS = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 a_quad;   // -0.5..0.5
+uniform mat4 u_proj;
+uniform mat4 u_view;
+uniform vec3 u_center;
+uniform vec3 u_right;
+uniform vec3 u_up;
+uniform float u_size;
+uniform vec2 u_uvBase;
+uniform float u_uvSize;
+out vec2 v_uv;
+out float v_dist;
+void main() {
+  vec3 world = u_center + (u_right * a_quad.x + u_up * a_quad.y) * u_size;
+  vec4 viewPos = u_view * vec4(world, 1.0);
+  v_dist = length(viewPos.xyz);
+  v_uv = u_uvBase + vec2(a_quad.x + 0.5, 0.5 - a_quad.y) * u_uvSize;
+  gl_Position = u_proj * viewPos;
+}
+`;
+
+export const ITEM_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+in float v_dist;
+uniform sampler2D u_atlas;
+uniform float u_dayLight;
+uniform float u_brightness;
+uniform vec3 u_fogColor;
+uniform float u_fogStart;
+uniform float u_fogEnd;
+out vec4 fragColor;
+void main() {
+  vec4 tex = texture(u_atlas, v_uv);
+  if (tex.a < 0.5) discard;
+  float ambient = clamp(0.35 + (u_brightness - 0.5) * 0.5, 0.1, 0.7);
+  float light = ambient + (1.0 - ambient) * u_dayLight;
+  vec3 rgb = tex.rgb * light;
+  float fog = clamp((v_dist - u_fogStart) / max(u_fogEnd - u_fogStart, 0.001), 0.0, 1.0);
+  rgb = mix(rgb, u_fogColor, fog);
+  fragColor = vec4(rgb, 1.0);
+}
+`;

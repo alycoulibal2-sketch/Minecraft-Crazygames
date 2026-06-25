@@ -39,6 +39,19 @@ export class Inventory {
     return count;
   }
 
+  // Add a whole stack object, preserving its dmg (tool durability). Damaged tools
+  // are placed into an empty slot as-is (they don't stack); everything else uses
+  // the normal merge-and-fill add(). Returns the count that did NOT fit.
+  addStack(stack) {
+    if (!stack || !stack.id) return 0;
+    if (stack.dmg) {
+      const i = this.firstEmpty();
+      if (i >= 0) { this.slots[i] = { id: stack.id, count: stack.count, dmg: stack.dmg }; return 0; }
+      return stack.count;
+    }
+    return this.add(stack.id, stack.count);
+  }
+
   // Remove up to `count` of id; returns number actually removed.
   remove(id, count) {
     let removed = 0;

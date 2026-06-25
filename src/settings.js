@@ -10,7 +10,8 @@ export const SETTINGS_DEFAULTS = {
   invertY: false,
   renderDistance: 6,    // chunks, 3..16
   brightness: 0.5,      // 0..1 (0.5 = neutral / current look)
-  volume: 0.5,          // 0..1 master audio
+  volume: 0.5,          // 0..1 master SFX
+  musicVolume: 0.4,     // 0..1 background music
   sprintFov: true,      // dynamic FOV boost while sprinting
   perspective: 0,       // 0 = first person, 1 = third (behind), 2 = third (front)
   pauseTimeInMenu: true,// freeze day/night while a menu is open
@@ -19,7 +20,7 @@ export const SETTINGS_DEFAULTS = {
 
 const RANGES = {
   fov: [30, 110], sensitivity: [0.2, 3.0], renderDistance: [3, 16],
-  brightness: [0, 1], volume: [0, 1],
+  brightness: [0, 1], volume: [0, 1], musicVolume: [0, 1],
 };
 
 export class Settings {

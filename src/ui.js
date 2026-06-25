@@ -235,7 +235,8 @@ export class UI {
     panel.appendChild(this._toggleRow('Invert Y-axis', 'invertY'));
     panel.appendChild(this._rangeRow('Render Distance', 'renderDistance', 3, 16, 1, (v) => Math.round(v) + ' chunks'));
     panel.appendChild(this._rangeRow('Brightness', 'brightness', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
-    panel.appendChild(this._rangeRow('Master Volume', 'volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._rangeRow('Sound Volume', 'volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._rangeRow('Music Volume', 'musicVolume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
     panel.appendChild(this._toggleRow('Sprint FOV Effect', 'sprintFov'));
     panel.appendChild(this._toggleRow('Pause Time in Menu', 'pauseTimeInMenu'));
 
@@ -257,14 +258,14 @@ export class UI {
   }
 
   closeScreen() {
-    // return crafting-grid + cursor items to inventory
+    // return crafting-grid + cursor items to inventory (addStack preserves tool dmg)
     if (this.screen === 'inventory' || this.screen === 'crafting') {
       for (let i = 0; i < this.craftGrid.length; i++) {
         const s = this.craftGrid[i];
-        if (s) { this.player.inventory.add(s.id, s.count); this.craftGrid[i] = null; }
+        if (s) { this.player.inventory.addStack(s); this.craftGrid[i] = null; }
       }
     }
-    if (this.cursor) { this.player.inventory.add(this.cursor.id, this.cursor.count); this.cursor = null; }
+    if (this.cursor) { this.player.inventory.addStack(this.cursor); this.cursor = null; }
     this.cursorEl.style.display = 'none';
     this.screen = null; this.invOpen = false; this.furnace = null;
     this.screenEl.style.display = 'none';
@@ -363,16 +364,29 @@ export class UI {
   // ---- a clickable slot bound to (store, index) ----
   _slot(store, index, type) {
     const slot = el('div', { class: 'slot' });
-    slot._store = store; slot._index = index; slot._type = type;
+    slot._store = store; slot._index = index; slot._type = type; slot._sig = null;
     this._refreshSlot(slot);
-    slot.addEventListener('click', (e) => { e.preventDefault(); this._onSlotClick(slot, false); });
-    slot.addEventListener('contextmenu', (e) => { e.preventDefault(); this._onSlotClick(slot, true); });
+    // Use mousedown (not click): the HUD rebuilds slot contents each frame, which
+    // can detach the click target between press and release and swallow the 'click'
+    // event entirely (right-click still worked because contextmenu fires on press).
+    // mousedown fires on press for BOTH buttons. Left = move/merge, right = take half.
+    slot.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 && e.button !== 2) return;
+      e.preventDefault(); e.stopPropagation();
+      this._onSlotClick(slot, e.button === 2);
+    });
+    slot.addEventListener('contextmenu', (e) => e.preventDefault());
     if (!this._slotEls) this._slotEls = [];
     this._slotEls.push(slot);
     return slot;
   }
   _refreshSlot(slot) {
     const stack = slot._store.get(slot._index);
+    // change-detection: only rebuild the slot's DOM when its contents changed,
+    // so the per-frame HUD update doesn't continually detach child nodes.
+    const sig = stack && stack.id ? stack.id + 'x' + stack.count + 'd' + (stack.dmg || 0) : '_';
+    if (sig === slot._sig) return;
+    slot._sig = sig;
     slot.innerHTML = '';
     if (stack && stack.id) {
       const ic = this.iconForItem(stack.id, 40); if (ic) slot.appendChild(ic);
@@ -402,7 +416,7 @@ export class UI {
           slotStack.count -= half; if (slotStack.count <= 0) store.set(index, null);
         }
       } else {
-        if (!slotStack) { store.set(index, { id: this.cursor.id, count: 1 }); this.cursor.count -= 1; }
+        if (!slotStack) { store.set(index, { id: this.cursor.id, count: 1, dmg: this.cursor.dmg }); this.cursor.count -= 1; }
         else if (slotStack.id === this.cursor.id && slotStack.count < this.maxStack(slotStack.id)) { slotStack.count += 1; this.cursor.count -= 1; }
         if (this.cursor.count <= 0) this.cursor = null;
       }

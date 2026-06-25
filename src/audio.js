@@ -4,16 +4,28 @@
 export class Audio {
   constructor() {
     this.ctx = null;
-    this.master = null;
+    this.master = null;       // SFX bus
+    this.musicGain = null;    // music bus (independent volume)
     this.enabled = true;
     this._lastStep = 0;
-    this.volume = 0.5;   // 0..1 (mapped to a safe gain ceiling)
+    this.volume = 0.5;        // SFX 0..1
+    this.musicVolume = 0.4;   // music 0..1
+    this._musicOn = false;
+    this._musicTimer = null;
+    this._nextNote = 0;
   }
 
-  // Set master volume (0..1). Applied immediately if the context exists.
+  // Set SFX volume (0..1). Applied immediately if the context exists.
   setVolume(v) {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.master) this.master.gain.value = this.volume * 0.7;
+  }
+
+  // Set music volume (0..1); starts/stops the generative music accordingly.
+  setMusicVolume(v) {
+    this.musicVolume = Math.max(0, Math.min(1, v));
+    if (this.musicGain) this.musicGain.gain.value = this.musicVolume * 0.18;
+    if (this._ok()) { if (this.musicVolume > 0) this._startMusic(); else this._stopMusic(); }
   }
 
   // Create/resume the context — must be called from a user gesture.
@@ -27,8 +39,12 @@ export class Audio {
         this.master = this.ctx.createGain();
         this.master.gain.value = this.volume * 0.7;
         this.master.connect(this.ctx.destination);
+        this.musicGain = this.ctx.createGain();
+        this.musicGain.gain.value = this.musicVolume * 0.18;
+        this.musicGain.connect(this.ctx.destination);
       }
       if (this.ctx.state === 'suspended') this.ctx.resume();
+      if (this.musicVolume > 0) this._startMusic();
     } catch (e) { this.enabled = false; }
   }
 
@@ -116,4 +132,47 @@ export class Audio {
   eat() { if (!this._ok()) return; for (let i = 0; i < 3; i++) setTimeout(() => this._tone('triangle', 200 + Math.random() * 120, 0.06, 0.16), i * 80); }
   splash() { if (!this._ok()) return; const n = this._noise(0.2); const f = this.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1200; n.connect(f); this._env(f, 0.25, 0.005, 0.2, this.master); n.start(); n.stop(this._t + 0.25); }
   click() { this._tone('square', 440, 0.04, 0.12); }
+  pickup() { if (!this._ok()) return; this._tone('triangle', 700, 0.05, 0.12); setTimeout(() => this._tone('triangle', 1050, 0.05, 0.09), 45); }
+  levelup() { if (!this._ok()) return; [523, 659, 784].forEach((f, i) => setTimeout(() => this._tone('triangle', f, 0.14, 0.14), i * 90)); }
+
+  // ----- original generative ambient music (NOT Minecraft's copyrighted music) -----
+  // Sparse, calm pentatonic notes with soft pad envelopes, scheduled with lookahead.
+  _startMusic() {
+    if (!this._ok() || this._musicOn || this.musicVolume <= 0) return;
+    this._musicOn = true;
+    this._nextNote = this._t + 0.3;
+    this._musicTimer = setInterval(() => this._musicTick(), 250);
+  }
+  _stopMusic() {
+    this._musicOn = false;
+    if (this._musicTimer) { clearInterval(this._musicTimer); this._musicTimer = null; }
+  }
+  _musicTick() {
+    if (!this._ok() || !this._musicOn) { this._stopMusic(); return; }
+    const horizon = this._t + 1.5;
+    while (this._nextNote < horizon) {
+      this._musicNote(this._nextNote);
+      this._nextNote += 0.42 + Math.random() * 0.55;   // spacing between notes
+    }
+  }
+  _musicNote(time) {
+    if (Math.random() < 0.18) return;                  // occasional rest
+    const f = MUSIC_SCALE[(Math.random() * MUSIC_SCALE.length) | 0];
+    this._musicVoice(f, time, 0.9 + Math.random() * 0.8, 0.12);
+    if (Math.random() < 0.22) this._musicVoice(f * 1.5, time + 0.03, 1.2, 0.05);  // soft harmony
+    if (Math.random() < 0.14) this._musicVoice(f / 2, time, 1.6, 0.09);            // low pad
+  }
+  _musicVoice(freq, time, dur, gain) {
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle'; o.frequency.value = freq;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(gain, time + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    o.connect(g); g.connect(this.musicGain);
+    o.start(time); o.stop(time + dur + 0.05);
+  }
 }
+
+// C major pentatonic across ~2 octaves (Hz) — a calm, neutral palette.
+const MUSIC_SCALE = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];

@@ -107,6 +107,16 @@ assert(!err, 'menus + settings + 3rd-person render run without throwing' + (err 
 assert(game.mode === 'survival', 'game mode switched to survival via applyGameMode (Options path)');
 assert(game.camera.fov > 0, 'camera fov stays valid after FOV change');
 
+console.log('\n== dropped item entities (spawn + render + pickup) ==');
+err = null;
+try {
+  const p = game.player;
+  game.entities.spawnItem(p.pos[0] + 1.2, p.pos[1], p.pos[2], 2, 4);   // id 2 = a block item
+  game.entities.spawnItem(p.pos[0], p.pos[1], p.pos[2] + 1.2, 3, 1);
+  for (let i = 0; i < 30; i++) game._loop(5300 + i * 16);
+} catch (e) { err = e; }
+assert(!err, 'dropped items spawn, render, and update without throwing' + (err ? ': ' + err.stack : ''));
+
 console.log('\n== save + reload roundtrip via localStorage ==');
 err = null;
 try {

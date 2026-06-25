@@ -2,11 +2,12 @@
 
 import { createProgram, createTextureFromCanvas, Mesh } from './glutil.js';
 import {
-  TERRAIN_VS, TERRAIN_FS, LINE_VS, LINE_FS, SKY_VS, SKY_FS, ENTITY_VS, ENTITY_FS,
+  TERRAIN_VS, TERRAIN_FS, LINE_VS, LINE_FS, SKY_VS, SKY_FS, ENTITY_VS, ENTITY_FS, ITEM_VS, ITEM_FS,
 } from './shaders.js';
-import { buildAtlas } from './textures.js';
+import { buildAtlas, ATLAS_COLS } from './textures.js';
 import { setUVLookup } from './chunk.js';
 import { MOBS } from './entities.js';
+import { ITEMS } from './items.js';
 import { mat4, modelMatrix } from './math.js';
 
 const LAYOUT = [
@@ -54,7 +55,9 @@ export class Renderer {
     this.line = createProgram(gl, LINE_VS, LINE_FS);
     this.sky = createProgram(gl, SKY_VS, SKY_FS);
     this.entity = createProgram(gl, ENTITY_VS, ENTITY_FS);
+    this.itemProg = createProgram(gl, ITEM_VS, ITEM_FS);
     this._modelMat = mat4();
+    this._itemUV = new Map();   // itemId -> [u, v] atlas top-left (lazy)
 
     const atlas = buildAtlas();
     this.atlasTex = createTextureFromCanvas(gl, atlas.canvas);
@@ -66,6 +69,7 @@ export class Renderer {
     this._initSky();
     this._initSelection();
     this._initEntities();
+    this._initItems();
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -140,6 +144,63 @@ export class Renderer {
       gl.bindVertexArray(null);
       this.playerMesh = { vao, count: idx.length };
     }
+  }
+
+  _initItems() {
+    const gl = this.gl;
+    this.itemVao = gl.createVertexArray();
+    gl.bindVertexArray(this.itemVao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    // two triangles, a_quad in -0.5..0.5
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5,
+    ]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+
+  _uvForItem(id) {
+    let uv = this._itemUV.get(id);
+    if (uv === undefined) {
+      const it = ITEMS[id];
+      uv = (it && this.atlasUV.get(it.icon)) || null;
+      this._itemUV.set(id, uv);
+    }
+    return uv;
+  }
+
+  _drawItems(entityManager, proj, view, env) {
+    if (!entityManager || !entityManager.items || entityManager.items.length === 0) return;
+    const gl = this.gl, p = this.itemProg;
+    gl.useProgram(p.program);
+    gl.uniformMatrix4fv(p.uniforms.u_proj, false, proj);
+    gl.uniformMatrix4fv(p.uniforms.u_view, false, view);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
+    gl.uniform1i(p.uniforms.u_atlas, 0);
+    gl.uniform1f(p.uniforms.u_dayLight, env.dayLight);
+    gl.uniform1f(p.uniforms.u_brightness, env.brightness == null ? 0.5 : env.brightness);
+    gl.uniform3fv(p.uniforms.u_fogColor, env.fogColor);
+    gl.uniform1f(p.uniforms.u_fogStart, env.fogStart);
+    gl.uniform1f(p.uniforms.u_fogEnd, env.fogEnd);
+    // camera right/up in world space (rows of the view rotation)
+    gl.uniform3f(p.uniforms.u_right, view[0], view[4], view[8]);
+    gl.uniform3f(p.uniforms.u_up, view[1], view[5], view[9]);
+    gl.uniform1f(p.uniforms.u_uvSize, 1 / ATLAS_COLS);
+    gl.uniform1f(p.uniforms.u_size, 0.42);
+    gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.bindVertexArray(this.itemVao);
+    for (const it of entityManager.items) {
+      const uv = this._uvForItem(it.id);
+      if (!uv) continue;
+      const bob = Math.sin(it.age * 3) * 0.08 + 0.28;
+      gl.uniform3f(p.uniforms.u_center, it.pos[0], it.pos[1] + bob, it.pos[2]);
+      gl.uniform2f(p.uniforms.u_uvBase, uv[0], uv[1]);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    gl.bindVertexArray(null);
   }
 
   // bind entity program + set the per-frame common uniforms; returns the program.
@@ -257,6 +318,8 @@ export class Renderer {
     this._drawEntities(entityManager, proj, view, env);
     // player body in 3rd person
     if (camera.perspective !== 0) this._drawPlayerBody(player, proj, view, env);
+    // dropped items (billboards)
+    this._drawItems(entityManager, proj, view, env);
 
     // transparent pass — re-bind terrain program after the entity pass.
     // (terrain's other uniforms persist per-program from earlier this frame.)

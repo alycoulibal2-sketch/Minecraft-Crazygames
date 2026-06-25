@@ -118,5 +118,44 @@ assert(player.inventory.countOf(DIRT) === 7, 'cursor item returned to inventory 
 assert(player.inventory.countOf(STONE) === 3, 'craft-grid items returned to inventory on close');
 assert(ui.cursor === null && ui.screen === null, 'screen closed cleanly');
 
+console.log('\n== slots respond to mousedown (not click — avoids per-frame detach bug) ==');
+{
+  const inv2 = new Inventory(); inv2.set(0, { id: DIRT, count: 8 });
+  ui.cursor = null;
+  const s = ui._slot(inv2, 0, 'normal');
+  const md = s._listeners.mousedown && s._listeners.mousedown[0];
+  assert(typeof md === 'function', 'slot has a mousedown handler');
+  assert(!(s._listeners.click && s._listeners.click.length), 'slot has NO click handler (the detach bug)');
+  const ev = { button: 0, preventDefault() {}, stopPropagation() {} };
+  md(ev);
+  assert(ui.cursor && ui.cursor.id === DIRT && ui.cursor.count === 8 && inv2.get(0) === null, 'left mousedown picks up whole stack');
+  const s2 = ui._slot(inv2, 1, 'normal');
+  s2._listeners.mousedown[0](ev);   // left mousedown into empty slot -> drop
+  assert(inv2.get(1) && inv2.get(1).count === 8 && ui.cursor === null, 'left mousedown drops the stack');
+  // right mousedown takes half
+  const s3 = ui._slot(inv2, 1, 'normal');
+  s3._listeners.mousedown[0]({ button: 2, preventDefault() {}, stopPropagation() {} });
+  assert(ui.cursor && ui.cursor.count === 4 && inv2.get(1).count === 4, 'right mousedown takes half');
+}
+
+console.log('\n== tool durability (dmg) preserved through place + close ==');
+{
+  // right-click place-one keeps dmg
+  const inv3 = new Inventory();
+  ui.cursor = { id: PICK, count: 1, dmg: 5 };
+  ui._onSlotClick(slot(inv3, 0), true);   // right-click into empty slot
+  assert(inv3.get(0) && inv3.get(0).id === PICK && inv3.get(0).dmg === 5, 'right-click place-one preserves tool dmg');
+
+  // closing a screen returns a damaged tool with its dmg intact
+  player.inventory = new Inventory();
+  ui.cursor = { id: PICK, count: 1, dmg: 9 };
+  ui.craftGrid = [{ id: PICK, count: 1, dmg: 3 }, null, null, null, null, null, null, null, null];
+  ui.screen = 'crafting';
+  ui.closeScreen();
+  const slots = player.inventory.slots.filter(s => s && s.id === PICK);
+  const dmgs = slots.map(s => s.dmg).sort((a, b) => a - b);
+  assert(dmgs.includes(9) && dmgs.includes(3), `closeScreen preserves dmg on returned tools (got ${JSON.stringify(dmgs)})`);
+}
+
 console.log('\n' + (failures === 0 ? '✅ ALL UI TESTS PASSED' : `❌ ${failures} UI ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);

@@ -302,15 +302,18 @@ assert(dropItemsOk, 'all mob drop items exist in the item registry');
   assert(miss === null, 'raycastMob misses when mob is not in the ray path');
 }
 
-{ // death drops into inventory (survival)
+{ // mob death drops a ground item, then is collected by walking near it (survival)
   const flat = { getBlock(x, y, z) { if (y < 64) return ID.stone; if (y === 64) return ID.grass_block; return AIR; } };
   const em = new EntityManager(flat);
-  const pl = new Player(flat); pl.mode = 'survival';
+  const pl = new Player(flat); pl.mode = 'survival'; pl.pos = [0.5, 65, 0.5];
   const pig = new Mob('pig', 0.5, 65, 0.5); pig.dead = true;
   em.mobs = [pig];
-  em.update(1 / 60, pl, { mode: 'survival' }, { dayLight: 1.0 });
-  assert(pl.inventory.countOf(ITEM_ID['porkchop']) >= 1, 'killed pig drops porkchop into inventory');
+  const game = { mode: 'survival', audio: null };
+  em.update(1 / 60, pl, game, { dayLight: 1.0 });
+  assert(em.items.length >= 1, 'killed pig drops a porkchop item on the ground');
   assert(!em.mobs.includes(pig), 'dead mob removed from manager');
+  let t = 0; while (em.items.length > 0 && t < 5) { em.update(1 / 60, pl, game, { dayLight: 1.0 }); t += 1 / 60; }
+  assert(pl.inventory.countOf(ITEM_ID['porkchop']) >= 1, 'walking over the drop collects the porkchop');
 }
 
 { // player melee kills a mob via raycast
@@ -343,6 +346,29 @@ console.log('\n== Survival hand-mining removes a block ==');
   assert(removed, 'holding break removes a dirt block by hand in survival');
   assert(t < 1.2, `dirt mined by hand in ~1s (t=${t.toFixed(2)}s)`);
   assert(pl.inventory.has(ITEM_ID['dirt']), 'mined dirt dropped into inventory');
+}
+
+console.log('\n== Item-drop entities (break -> ground item -> walk-over pickup) ==');
+{
+  const fb = new Map();
+  const k = (x, y, z) => x + ',' + y + ',' + z;
+  const flat = {
+    getBlock(x, y, z) { const v = fb.get(k(x, y, z)); if (v !== undefined) return v; return y < 64 ? ID.stone : (y === 64 ? ID.dirt : AIR); },
+    setBlock(x, y, z, id) { fb.set(k(x, y, z), id); },
+    raycast() { return this.getBlock(0, 64, 0) === ID.dirt ? { hit: true, id: ID.dirt, x: 0, y: 64, z: 0, nx: 0, ny: 1, nz: 0, t: 1.0 } : { hit: false }; },
+  };
+  const em = new EntityManager(flat);
+  const pl = new Player(flat); pl.mode = 'survival'; pl.pos = [0.5, 65, 0.5]; pl.pitch = -Math.PI / 2;
+  const game = { entities: em, mode: 'survival', audio: null };
+  const inp = makeInput(); inp.buttons[0] = true;
+  const dt = 1 / 60; let t = 0;
+  while (em.items.length === 0 && t < 3) { pl._interact(dt, inp, game); t += dt; }
+  assert(em.items.length >= 1, 'breaking a block in survival spawns a ground item entity');
+  assert(!pl.inventory.has(ITEM_ID['dirt']), 'broken block does NOT go straight to inventory (it lies on the ground)');
+  inp.buttons[0] = false;
+  let t2 = 0;
+  while (em.items.length > 0 && t2 < 5) { em.update(dt, pl, game); t2 += dt; }
+  assert(pl.inventory.has(ITEM_ID['dirt']), 'walking near the dropped item picks it up into the inventory');
 }
 
 console.log('\n== Settings (persist / clamp / reset) ==');
