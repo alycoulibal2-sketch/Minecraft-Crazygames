@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "serve": "node tools/serve.js",
-    "test": "node tools/smoke-test.mjs && node tools/ui-test.mjs && node tools/boot-test.mjs"
+    "build": "node tools/build-standalone.mjs",
+    "test": "node tools/smoke-test.mjs && node tools/ui-test.mjs && node tools/boot-test.mjs && node tools/build-standalone.mjs && node tools/standalone-test.mjs"
   },
   "license": "MIT",
   "private": true

@@ -22,6 +22,10 @@ Or with Python: `python -m http.server 8080`. Then click the canvas to lock the 
 
 Requires a browser with **WebGL2** (Chrome, Edge, Firefox, Safari 15+).
 
+### 📱 Single-file build (mobile / no server)
+
+`npm run build` bundles the entire game into one self-contained file, **`dist/minecraft.html`** — no server, no install, no external assets. Open it directly in any modern mobile or desktop browser (or email/AirDrop it to your phone) and it plays with on-screen touch controls. A prebuilt copy is committed at [`dist/minecraft.html`](dist/minecraft.html).
+
 ## 🎮 Controls
 
 | Action | Key |
