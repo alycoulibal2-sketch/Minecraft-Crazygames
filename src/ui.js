@@ -76,12 +76,18 @@ export class UI {
     this.debugEl = el('div', { id: 'debug' }); this.debugEl.style.display = 'none'; root.appendChild(this.debugEl);
 
     this.hintEl = el('div', { id: 'hint' });
-    this.hintEl.innerHTML = 'Click to play &nbsp;·&nbsp; WASD move · Space jump · double-Space fly · Shift sneak/down · Ctrl sprint · E inventory · G mode · F3 debug · 1-9 / wheel hotbar · LMB break · RMB place/use · K save (auto-saves too)';
+    this.hintEl.innerHTML = 'Click to play &nbsp;·&nbsp; WASD move · Space jump · double-Space fly · Shift sneak/down · Ctrl sprint · E inventory · Esc menu · G options · F5 camera · F3 debug · 1-9 / wheel hotbar · LMB break · RMB place/use<br><b>Change Game Mode (Survival) in Esc → Options.</b>';
     root.appendChild(this.hintEl);
 
-    // death screen
+    // death screen (with a real Respawn button)
     this.deathEl = el('div', { id: 'death' }); this.deathEl.style.display = 'none';
-    this.deathEl.innerHTML = '<h1>You Died!</h1><p>Respawning…</p>';
+    const dHead = el('h1'); dHead.textContent = 'You Died!';
+    const dSub = el('p'); dSub.textContent = 'Game over';
+    const respawnBtn = el('button', { class: 'mc-btn' }); respawnBtn.textContent = 'Respawn';
+    respawnBtn.addEventListener('click', () => { if (this.game) this.game._respawn(); });
+    const dOpts = el('button', { class: 'mc-btn' }); dOpts.textContent = 'Options…';
+    dOpts.addEventListener('click', () => this.openOptions());
+    this.deathEl.append(dHead, dSub, respawnBtn, dOpts);
     root.appendChild(this.deathEl);
 
     // saved toast
@@ -115,6 +121,124 @@ export class UI {
     if (document.pointerLockElement) document.exitPointerLock();
     this._renderCreative();
     this.screenEl.style.display = 'flex';
+  }
+
+  // ---- pause / options menus ----
+  isPauseScreen() { return this.screen === 'pause' || this.screen === 'options'; }
+
+  openPause() {
+    this.screen = 'pause'; this.invOpen = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this._renderPause();
+    this.screenEl.style.display = 'flex';
+  }
+  openOptions() {
+    this.screen = 'options'; this.invOpen = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this._renderOptions();
+    this.screenEl.style.display = 'flex';
+  }
+
+  _menuPanel(titleText) {
+    const panel = el('div', { class: 'panel mc-menu' });
+    const t = el('div', { class: 'panel-title' }); t.textContent = titleText;
+    panel.appendChild(t);
+    return panel;
+  }
+  _menuButton(label, onClick) {
+    const b = el('button', { class: 'mc-btn' });
+    b.textContent = label;
+    b.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    return b;
+  }
+  _rangeRow(label, key, min, max, step, fmt) {
+    const s = this.game.settings;
+    const row = el('div', { class: 'mc-row' });
+    const lab = el('label', { class: 'mc-label' });
+    const val = el('span', { class: 'mc-val' });
+    lab.textContent = label + ': '; lab.appendChild(val);
+    const inp = el('input', { class: 'mc-range' });
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = s[key];
+    const render = () => { val.textContent = fmt ? fmt(s[key]) : s[key]; };
+    inp.addEventListener('input', () => { s.set(key, parseFloat(inp.value)); this.game.applySettings(); render(); });
+    render();
+    row.append(lab, inp);
+    return row;
+  }
+  _toggleRow(label, key) {
+    const s = this.game.settings;
+    const row = el('div', { class: 'mc-row' });
+    const lab = el('label', { class: 'mc-label' }); lab.textContent = label;
+    const b = this._menuButton('', () => { s.set(key, !s[key]); this.game.applySettings(); upd(); });
+    const upd = () => { b.textContent = s[key] ? 'ON' : 'OFF'; };
+    upd();
+    row.append(lab, b);
+    return row;
+  }
+  _cycleRow(label, options, getCur, setCur) {
+    const row = el('div', { class: 'mc-row' });
+    const lab = el('label', { class: 'mc-label' }); lab.textContent = label;
+    const b = this._menuButton('', () => {
+      let i = options.findIndex((o) => o.value === getCur());
+      i = (i + 1) % options.length;
+      setCur(options[i].value); upd();
+    });
+    const upd = () => {
+      const cur = getCur();
+      const o = options.find((x) => x.value === cur) || options[0];
+      b.textContent = o.label;
+    };
+    upd();
+    row.append(lab, b);
+    return row;
+  }
+
+  _renderPause() {
+    const g = this.game;
+    const panel = this._menuPanel('Game Menu');
+    const mode = g ? g.mode : 'creative';
+    const sub = el('div', { class: 'mc-sub' });
+    sub.textContent = 'Mode: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+    panel.appendChild(sub);
+    panel.appendChild(this._menuButton('Back to Game', () => this.closeScreen()));
+    panel.appendChild(this._menuButton('Options…', () => this.openOptions()));
+    panel.appendChild(this._menuButton('Save Game', () => { if (g && g.saveNow) g.saveNow(); }));
+    if (g && this.player.dead) panel.appendChild(this._menuButton('Respawn', () => { g._respawn(); this.closeScreen(); }));
+    this.screenEl.innerHTML = ''; this.screenEl.appendChild(panel);
+  }
+
+  _renderOptions() {
+    const g = this.game, s = g.settings;
+    const panel = this._menuPanel('Options');
+    const note = el('div', { class: 'mc-sub' }); note.textContent = 'Change Game Mode here to enter Survival.';
+    panel.appendChild(note);
+
+    // Game Mode is the gateway to Survival (per design).
+    panel.appendChild(this._cycleRow('Game Mode',
+      [{ value: 'creative', label: 'Creative' }, { value: 'survival', label: 'Survival' }, { value: 'spectator', label: 'Spectator' }],
+      () => g.mode, (v) => g.applyGameMode(v)));
+    panel.appendChild(this._cycleRow('Difficulty',
+      [{ value: 'peaceful', label: 'Peaceful' }, { value: 'easy', label: 'Easy' }, { value: 'normal', label: 'Normal' }, { value: 'hard', label: 'Hard' }],
+      () => s.difficulty, (v) => { s.set('difficulty', v); g.applySettings(); }));
+    panel.appendChild(this._cycleRow('Camera Perspective',
+      [{ value: 0, label: 'First Person' }, { value: 1, label: 'Third Person (Back)' }, { value: 2, label: 'Third Person (Front)' }],
+      () => s.perspective, (v) => { s.set('perspective', v); g.applySettings(); }));
+    panel.appendChild(this._rangeRow('FOV', 'fov', 30, 110, 1, (v) => Math.round(v) + '°'));
+    panel.appendChild(this._rangeRow('Mouse Sensitivity', 'sensitivity', 0.2, 3, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._toggleRow('Invert Y-axis', 'invertY'));
+    panel.appendChild(this._rangeRow('Render Distance', 'renderDistance', 3, 16, 1, (v) => Math.round(v) + ' chunks'));
+    panel.appendChild(this._rangeRow('Brightness', 'brightness', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._rangeRow('Master Volume', 'volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._toggleRow('Sprint FOV Effect', 'sprintFov'));
+    panel.appendChild(this._toggleRow('Pause Time in Menu', 'pauseTimeInMenu'));
+
+    const footer = el('div', { class: 'mc-footer' });
+    footer.append(
+      this._menuButton('Reset to Defaults', () => { s.reset(); g.applySettings(); this._renderOptions(); }),
+      this._menuButton('Done', () => this.openPause())
+    );
+    panel.appendChild(footer);
+    this.screenEl.innerHTML = ''; this.screenEl.appendChild(panel);
   }
 
   // mode-aware toggle (called by game on 'E')

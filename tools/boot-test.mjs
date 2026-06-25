@@ -89,6 +89,24 @@ try {
 } catch (e) { err = e; }
 assert(!err, 'all container screens open/close + render without throwing' + (err ? ': ' + err.stack : ''));
 
+console.log('\n== pause / options menus + settings + 3rd-person + game-mode path ==');
+err = null;
+try {
+  game.ui.openPause(); game._loop(5100);
+  game.ui.openOptions(); game._loop(5116);
+  // drive settings through the live API the menu uses
+  game.settings.set('perspective', 1); game.applySettings(); game._loop(5132); // 3rd-person render path
+  game.settings.set('perspective', 2); game.applySettings(); game._loop(5148);
+  game.settings.set('fov', 95); game.settings.set('brightness', 0.8); game.settings.set('volume', 0.7);
+  game.applySettings(); game._loop(5164);
+  game.applyGameMode('survival');     // the Options path into Survival
+  game.ui.closeScreen(); game._loop(5180);
+  game.settings.set('perspective', 0); game.applySettings();
+} catch (e) { err = e; }
+assert(!err, 'menus + settings + 3rd-person render run without throwing' + (err ? ': ' + err.stack : ''));
+assert(game.mode === 'survival', 'game mode switched to survival via applyGameMode (Options path)');
+assert(game.camera.fov > 0, 'camera fov stays valid after FOV change');
+
 console.log('\n== save + reload roundtrip via localStorage ==');
 err = null;
 try {

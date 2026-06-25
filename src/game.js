@@ -16,6 +16,7 @@ import { TouchControls } from './touch.js';
 import { CHUNK_X, CHUNK_Z } from './config.js';
 import { save, load, applySave } from './persistence.js';
 import { EntityManager } from './entities.js';
+import { Settings } from './settings.js';
 
 const AUTOSAVE_INTERVAL = 25; // seconds
 
@@ -36,10 +37,14 @@ export class Game {
     this.camera = new Camera();
     this.input = new Input(canvas);
     this.ui = new UI(uiRoot, this.renderer.atlasCanvas, this.renderer.atlasUV, this.player);
+    this.ui.game = this;
+    this.settings = new Settings();
 
-    this.renderDistance = DEFAULT_RENDER_DISTANCE;
+    this.renderDistance = this.settings.renderDistance;
+    this.difficulty = this.settings.difficulty;
     this.timeOfDay = 0.3;       // 0..1
     this.timePaused = false;
+    this._wasLocked = false;
     this.mode = 'creative';
     this.fps = 60;
     this._acc = 0; this._frames = 0; this._fpsTimer = 0;
@@ -51,6 +56,7 @@ export class Game {
     this.touch = new TouchControls(this.input, this);
     this._prevHealth = 20; this._prevHunger = 20; this._wasInWater = false;
 
+    this.applySettings();
     this._spawn();
     if (saved) {
       const pos = applySave(this, saved);
@@ -104,6 +110,26 @@ export class Game {
     this.player.setMode(this.mode);
   }
 
+  // Set game mode explicitly (used by the Options menu — the path to Survival).
+  applyGameMode(mode) {
+    if (mode !== 'creative' && mode !== 'survival' && mode !== 'spectator') return;
+    this.mode = mode;
+    this.player.setMode(mode);
+  }
+
+  // Push current settings into the live systems (called on change + each frame).
+  applySettings() {
+    const s = this.settings;
+    this.renderDistance = s.renderDistance;
+    this.difficulty = s.difficulty;
+    this.camera.perspective = s.perspective;
+    this.input.sensitivity = s.sensitivity;
+    this.input.invertY = s.invertY;
+    if (this.audio) this.audio.setVolume(s.volume);
+  }
+
+  saveNow() { if (save(this)) this.ui.flashSaved?.(); }
+
   onBreak(id, x, y, z) {
     if (id === ID.furnace) this.furnaces.delete(x + ',' + y + ',' + z);
     this.audio.break(BLOCKS[id]?.name);
@@ -155,9 +181,8 @@ export class Game {
     const p = this.player;
     if (p.mode !== 'survival') return;
     if (p.dead) {
-      this._deathTimer += dt;
-      if (this.ui.invOpen) this.ui.closeScreen();
-      if (this._deathTimer >= 1.2) { this._respawn(); this._deathTimer = 0; }
+      // close gameplay containers but allow the pause/options menu (Respawn lives there + on the death screen)
+      if (this.ui.invOpen && !this.ui.isPauseScreen()) this.ui.closeScreen();
       return;
     }
 
@@ -230,14 +255,21 @@ export class Game {
 
   _globalKeys() {
     const input = this.input;
-    if (input.wasTapped('KeyE')) { this.ui.toggleInventory(); }
+    // Escape / menu (also opened on pointer-lock loss in _loop, since some
+    // browsers swallow the Escape keydown that exits pointer lock).
+    if (input.wasTapped('Escape')) {
+      if (this.ui.screen === 'options') this.ui.openPause();
+      else if (this.ui.screen) this.ui.closeScreen();
+      else this.ui.openPause();
+    }
+    if (input.wasTapped('KeyE')) { if (this.ui.isPauseScreen()) this.ui.closeScreen(); else this.ui.toggleInventory(); }
     if (input.wasTapped('F3')) this.ui.toggleDebug();
-    if (input.wasTapped('KeyG')) this.cycleMode();
+    if (input.wasTapped('KeyG')) this.ui.openOptions();          // quick access to Options (Game Mode)
+    if (input.wasTapped('F5')) { this.settings.set('perspective', (this.settings.perspective + 1) % 3); this.applySettings(); }
     if (input.wasTapped('KeyT')) this.timePaused = !this.timePaused;
-    if (input.wasTapped('BracketRight')) this.renderDistance = Math.min(16, this.renderDistance + 1);
-    if (input.wasTapped('BracketLeft')) this.renderDistance = Math.max(3, this.renderDistance - 1);
-    if (input.wasTapped('Escape') && this.ui.invOpen) this.ui.toggleInventory(false);
-    if (input.wasTapped('KeyK')) { if (save(this)) this.ui.flashSaved?.(); }   // manual save
+    if (input.wasTapped('BracketRight')) { this.settings.set('renderDistance', this.settings.renderDistance + 1); this.applySettings(); }
+    if (input.wasTapped('BracketLeft')) { this.settings.set('renderDistance', this.settings.renderDistance - 1); this.applySettings(); }
+    if (input.wasTapped('KeyK')) this.saveNow();   // manual save
   }
 
   _env() {
@@ -255,7 +287,21 @@ export class Game {
     return {
       dayLight, skyTop, skyBottom, fogColor,
       fogStart: far * 0.55, fogEnd: far * 0.95,
+      brightness: this.settings.brightness,
     };
+  }
+
+  // Smoothly ease the camera FOV toward the target (with optional sprint zoom).
+  _updateFov(dt) {
+    const base = this.settings.fov * Math.PI / 180;
+    let target = base;
+    if (this.settings.sprintFov) {
+      const p = this.player;
+      const speed = Math.hypot(p.vel[0], p.vel[2]);
+      if (!p.flying && speed > 5.5) target = base * 1.12;
+      else if (p.flying && speed > 12) target = base * 1.10;
+    }
+    this.camera.fov += (target - this.camera.fov) * Math.min(1, dt * 10);
   }
 
   _loop(now) {
@@ -265,17 +311,30 @@ export class Game {
 
     this._globalKeys();
 
-    if (!this.timePaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
+    // open the pause menu when pointer lock is lost (some browsers swallow the
+    // Escape keydown that exits pointer lock, so we detect the lock transition).
+    if (this._wasLocked && !this.input.locked && !this.ui.invOpen) this.ui.openPause();
+    this._wasLocked = this.input.locked;
+
+    // live camera / control settings
+    this.input.sensitivity = this.settings.sensitivity;
+    this.input.invertY = this.settings.invertY;
+    this.camera.perspective = this.settings.perspective;
+    this._updateFov(dt);
+
+    const menuPaused = this.settings.pauseTimeInMenu && this.ui.isPauseScreen();
+
+    if (!this.timePaused && !menuPaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
 
     const env = this._env();
     this.touch.update();
     this.player.mode = this.mode;
-    if (!this.ui.invOpen) {
+    if (!this.ui.invOpen && !this.player.dead) {
       this.player.update(dt, this.input, this);
     }
     this._survivalTick(dt);
     this._tickFurnaces(dt);
-    this.entities.update(dt, this.player, this, env);
+    if (!menuPaused) this.entities.update(dt, this.player, this, env);
     this._audioTick(dt);
     this.ui.setHint(!this.input.locked && !this.ui.invOpen);
 

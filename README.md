@@ -41,10 +41,14 @@ Requires a browser with **WebGL2** (Chrome, Edge, Firefox, Safari 15+).
 | Pick block | Middle mouse |
 | Hotbar | `1`–`9`, mouse wheel |
 | Open inventory | `E` |
-| Switch game mode (creative→survival→spectator) | `G` |
+| Pause / Game menu | `Esc` |
+| Options (settings) | `G` |
+| Cycle camera perspective | `F5` |
 | Pause/resume day-night | `T` |
 | Render distance | `[` and `]` |
 | Debug overlay | `F3` |
+
+> **Game mode & settings:** open **Esc → Options** (or press `G`). The Options menu has **Game Mode** (this is how you switch to **Survival**), **Difficulty**, FOV, mouse sensitivity, invert-Y, camera perspective, render distance, brightness, master volume, and more. Settings persist on your device. On touch devices, use the ⚙ button.
 
 ## ✨ Features so far
 

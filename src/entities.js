@@ -227,15 +227,18 @@ export class EntityManager {
 
   update(dt, player, game, env) {
     const world = this.world;
+    const difficulty = (game && game.difficulty) || 'normal';
+    const peaceful = difficulty === 'peaceful';
     for (const m of this.mobs) m.update(dt, world, player, env);
 
-    // handle deaths + drops, and despawn far mobs
+    // handle deaths + drops, and despawn far mobs (and all hostiles on Peaceful)
     const px = player.pos[0], pz = player.pos[2];
     const keep = [];
     for (const m of this.mobs) {
       const far = Math.hypot(m.pos[0] - px, m.pos[2] - pz) > this.spawnRadius + 24;
       if (m.dead) { this._onDeath(m, player, game); continue; }
       if (far) continue;
+      if (peaceful && m.def.hostile) continue;   // Peaceful clears hostile mobs
       keep.push(m);
     }
     this.mobs = keep;
@@ -244,7 +247,7 @@ export class EntityManager {
     this._spawnTimer -= dt;
     if (this._spawnTimer <= 0) {
       this._spawnTimer = 2.5;
-      this._trySpawn(player, env);
+      this._trySpawn(player, env, peaceful);
     }
   }
 
@@ -266,10 +269,10 @@ export class EntityManager {
     }
   }
 
-  _trySpawn(player, env) {
+  _trySpawn(player, env, peaceful) {
     const { passive, hostile } = this.counts();
     const night = env ? env.dayLight < 0.35 : false;
-    const wantHostile = night && hostile < this.maxHostile;
+    const wantHostile = night && hostile < this.maxHostile && !peaceful;
     const wantPassive = !night && passive < this.maxPassive;
     if (!wantHostile && !wantPassive) return;
 

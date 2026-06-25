@@ -47,9 +47,28 @@
   #death { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column;
     align-items: center; justify-content: center; background: rgba(140,0,0,0.45); color: #fff; text-align: center; }
   #death h1 { font-size: 46px; margin-bottom: 8px; text-shadow: 2px 2px 0 #000; }
+  #death p { margin-bottom: 18px; opacity: 0.85; }
+  #death button { pointer-events: auto; }
 
   #screen { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 20; }
+    background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 35; }
+
+  /* pause / options menus */
+  .mc-menu { min-width: 340px; max-width: 460px; text-align: center; }
+  .mc-sub { color: #333; font-size: 12px; margin: -4px 0 12px; }
+  .mc-btn { display: block; width: 100%; margin: 6px 0; padding: 9px 12px; font: 600 14px/1 'Segoe UI', sans-serif;
+    color: #fff; background: #6b6b6b; border: 2px solid #2c2c2c; border-radius: 3px; cursor: pointer;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.25); pointer-events: auto; }
+  .mc-btn:hover { background: #7f8f7f; }
+  .mc-btn:active { box-shadow: inset 0 2px 0 rgba(0,0,0,0.25); }
+  .mc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 7px 0; }
+  .mc-row .mc-label { color: #222; font: 600 13px/1.2 'Segoe UI', sans-serif; flex: 0 0 auto; text-align: left; }
+  .mc-row .mc-val { color: #1b5e20; font-weight: 700; }
+  .mc-row .mc-range { flex: 1 1 auto; max-width: 200px; accent-color: #4a7; }
+  .mc-row .mc-btn { width: auto; min-width: 150px; margin: 0; flex: 0 0 auto; }
+  .mc-footer { display: flex; gap: 8px; margin-top: 14px; }
+  .mc-footer .mc-btn { margin: 0; }
+  #death .mc-btn { width: 220px; margin: 6px auto; }
   .panel { background: #c6c6c6; border: 4px solid #555; border-radius: 6px; padding: 14px 16px;
     max-width: 92vw; max-height: 88vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
   .panel-title { font-size: 14px; color: #222; margin-bottom: 10px; font-weight: 700; }

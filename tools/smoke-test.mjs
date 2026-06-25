@@ -323,5 +323,25 @@ assert(dropItemsOk, 'all mob drop items exist in the item registry');
   assert(zomb.health < before, `melee with diamond sword reduced mob health (${before} -> ${zomb.health})`);
 }
 
+console.log('\n== Settings (persist / clamp / reset) ==');
+{
+  const { Settings, SETTINGS_DEFAULTS } = await import(S('settings.js'));
+  const store = new Map();
+  const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  const s = new Settings(storage);
+  assert(s.fov === SETTINGS_DEFAULTS.fov, 'defaults applied on construct');
+  s.set('fov', 999);
+  assert(s.fov === 110, `numeric set is clamped to range (${s.fov})`);
+  s.set('sensitivity', 0.01);
+  assert(s.sensitivity === 0.2, 'sensitivity clamps to min');
+  s.set('difficulty', 'peaceful');
+  const s2 = new Settings(storage);
+  assert(s2.fov === 110 && s2.difficulty === 'peaceful', 'settings persist + reload from storage');
+  s2.reset();
+  assert(s2.fov === SETTINGS_DEFAULTS.fov && s2.difficulty === SETTINGS_DEFAULTS.difficulty, 'reset restores defaults');
+  const s3 = new Settings(storage);
+  assert(s3.fov === SETTINGS_DEFAULTS.fov, 'reset was persisted');
+}
+
 console.log('\n' + (failures === 0 ? '✅ ALL SMOKE TESTS PASSED' : `❌ ${failures} ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);

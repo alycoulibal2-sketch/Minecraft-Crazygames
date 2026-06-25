@@ -37,13 +37,14 @@ uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_alphaTest;    // 1.0 = discard transparent texels (cutout), 0.0 = blend
+uniform float u_brightness;   // 0..1 user gamma (0.5 = neutral)
 
 out vec4 fragColor;
 
 void main() {
   vec4 tex = texture(u_atlas, v_uv);
   if (u_alphaTest > 0.5 && tex.a < 0.5) discard;
-  float ambient = 0.18;
+  float ambient = clamp(0.18 + (u_brightness - 0.5) * 0.5, 0.04, 0.6);
   float light = ambient + (1.0 - ambient) * u_dayLight;
   vec3 rgb = tex.rgb * v_color * light;
   float fog = clamp((v_dist - u_fogStart) / max(u_fogEnd - u_fogStart, 0.001), 0.0, 1.0);
@@ -99,9 +100,10 @@ uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_hurt;       // 0..1 red flash
+uniform float u_brightness; // 0..1 user gamma (0.5 = neutral)
 out vec4 fragColor;
 void main() {
-  float ambient = 0.30;
+  float ambient = clamp(0.30 + (u_brightness - 0.5) * 0.5, 0.08, 0.7);
   float light = ambient + (1.0 - ambient) * u_dayLight;
   vec3 rgb = v_color * light;
   rgb = mix(rgb, vec3(1.0, 0.2, 0.2), u_hurt);

@@ -47,9 +47,28 @@
   #death { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column;
     align-items: center; justify-content: center; background: rgba(140,0,0,0.45); color: #fff; text-align: center; }
   #death h1 { font-size: 46px; margin-bottom: 8px; text-shadow: 2px 2px 0 #000; }
+  #death p { margin-bottom: 18px; opacity: 0.85; }
+  #death button { pointer-events: auto; }
 
   #screen { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 20; }
+    background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 35; }
+
+  /* pause / options menus */
+  .mc-menu { min-width: 340px; max-width: 460px; text-align: center; }
+  .mc-sub { color: #333; font-size: 12px; margin: -4px 0 12px; }
+  .mc-btn { display: block; width: 100%; margin: 6px 0; padding: 9px 12px; font: 600 14px/1 'Segoe UI', sans-serif;
+    color: #fff; background: #6b6b6b; border: 2px solid #2c2c2c; border-radius: 3px; cursor: pointer;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.25); pointer-events: auto; }
+  .mc-btn:hover { background: #7f8f7f; }
+  .mc-btn:active { box-shadow: inset 0 2px 0 rgba(0,0,0,0.25); }
+  .mc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 7px 0; }
+  .mc-row .mc-label { color: #222; font: 600 13px/1.2 'Segoe UI', sans-serif; flex: 0 0 auto; text-align: left; }
+  .mc-row .mc-val { color: #1b5e20; font-weight: 700; }
+  .mc-row .mc-range { flex: 1 1 auto; max-width: 200px; accent-color: #4a7; }
+  .mc-row .mc-btn { width: auto; min-width: 150px; margin: 0; flex: 0 0 auto; }
+  .mc-footer { display: flex; gap: 8px; margin-top: 14px; }
+  .mc-footer .mc-btn { margin: 0; }
+  #death .mc-btn { width: 220px; margin: 6px auto; }
   .panel { background: #c6c6c6; border: 4px solid #555; border-radius: 6px; padding: 14px 16px;
     max-width: 92vw; max-height: 88vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
   .panel-title { font-size: 14px; color: #222; margin-bottom: 10px; font-weight: 700; }
@@ -123,6 +142,13 @@ class Audio {
     this.master = null;
     this.enabled = true;
     this._lastStep = 0;
+    this.volume = 0.5;   // 0..1 (mapped to a safe gain ceiling)
+  }
+
+  // Set master volume (0..1). Applied immediately if the context exists.
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master) this.master.gain.value = this.volume * 0.7;
   }
 
   // Create/resume the context — must be called from a user gesture.
@@ -134,7 +160,7 @@ class Audio {
         if (!AC) { this.enabled = false; return; }
         this.ctx = new AC();
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.35;
+        this.master.gain.value = this.volume * 0.7;
         this.master.connect(this.ctx.destination);
       }
       if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -402,8 +428,10 @@ __exports.BEDROCK = BEDROCK;
 };
 __modules["camera.js"] = function(__exports, __require){
 // camera.js — projection + view matrix holder.
-const { mat4, perspective, viewFromYawPitch } = __require('math.js');
+const { mat4, perspective, viewFromYawPitch, dirFromYawPitch } = __require('math.js');
 const { PLAYER_EYE } = __require('config.js');
+
+const THIRD_PERSON_DIST = 4.0;
 
 class Camera {
   constructor() {
@@ -411,13 +439,30 @@ class Camera {
     this.near = 0.08;
     this.far = 1000;
     this.aspect = 1;
+    this.perspective = 0;      // 0 first-person, 1 third (behind), 2 third (front)
     this.proj = mat4();
     this.view = mat4();
   }
   setAspect(a) { this.aspect = a; }
   updateProj() { perspective(this.proj, this.fov, this.aspect, this.near, this.far); return this.proj; }
-  updateView(player) {
+
+  updateView(player, world) {
     const eye = [player.pos[0], player.pos[1] + PLAYER_EYE, player.pos[2]];
+    if (this.perspective !== 0) {
+      // back (1): camera behind, looking along player's view; front (2): in front, looking back.
+      const front = this.perspective === 2;
+      const dir = dirFromYawPitch(player.yaw, player.pitch);
+      const rd = front ? [dir[0], dir[1], dir[2]] : [-dir[0], -dir[1], -dir[2]];
+      let dist = THIRD_PERSON_DIST;
+      if (world && world.raycast) {
+        const h = world.raycast(eye, rd, dist + 0.4);
+        if (h && h.hit) dist = Math.max(0.4, h.t - 0.3);  // don't clip through walls
+      }
+      const cam = [eye[0] + rd[0] * dist, eye[1] + rd[1] * dist, eye[2] + rd[2] * dist];
+      viewFromYawPitch(this.view, cam, front ? player.yaw + Math.PI : player.yaw, front ? -player.pitch : player.pitch);
+      this.eye = cam;
+      return this.view;
+    }
     viewFromYawPitch(this.view, eye, player.yaw, player.pitch);
     this.eye = eye;
     return this.view;
@@ -912,15 +957,18 @@ class EntityManager {
 
   update(dt, player, game, env) {
     const world = this.world;
+    const difficulty = (game && game.difficulty) || 'normal';
+    const peaceful = difficulty === 'peaceful';
     for (const m of this.mobs) m.update(dt, world, player, env);
 
-    // handle deaths + drops, and despawn far mobs
+    // handle deaths + drops, and despawn far mobs (and all hostiles on Peaceful)
     const px = player.pos[0], pz = player.pos[2];
     const keep = [];
     for (const m of this.mobs) {
       const far = Math.hypot(m.pos[0] - px, m.pos[2] - pz) > this.spawnRadius + 24;
       if (m.dead) { this._onDeath(m, player, game); continue; }
       if (far) continue;
+      if (peaceful && m.def.hostile) continue;   // Peaceful clears hostile mobs
       keep.push(m);
     }
     this.mobs = keep;
@@ -929,7 +977,7 @@ class EntityManager {
     this._spawnTimer -= dt;
     if (this._spawnTimer <= 0) {
       this._spawnTimer = 2.5;
-      this._trySpawn(player, env);
+      this._trySpawn(player, env, peaceful);
     }
   }
 
@@ -951,10 +999,10 @@ class EntityManager {
     }
   }
 
-  _trySpawn(player, env) {
+  _trySpawn(player, env, peaceful) {
     const { passive, hostile } = this.counts();
     const night = env ? env.dayLight < 0.35 : false;
-    const wantHostile = night && hostile < this.maxHostile;
+    const wantHostile = night && hostile < this.maxHostile && !peaceful;
     const wantPassive = !night && passive < this.maxPassive;
     if (!wantHostile && !wantPassive) return;
 
@@ -1039,6 +1087,7 @@ const { TouchControls } = __require('touch.js');
 const { CHUNK_X, CHUNK_Z } = __require('config.js');
 const { save, load, applySave } = __require('persistence.js');
 const { EntityManager } = __require('entities.js');
+const { Settings } = __require('settings.js');
 
 const AUTOSAVE_INTERVAL = 25; // seconds
 
@@ -1059,10 +1108,14 @@ class Game {
     this.camera = new Camera();
     this.input = new Input(canvas);
     this.ui = new UI(uiRoot, this.renderer.atlasCanvas, this.renderer.atlasUV, this.player);
+    this.ui.game = this;
+    this.settings = new Settings();
 
-    this.renderDistance = DEFAULT_RENDER_DISTANCE;
+    this.renderDistance = this.settings.renderDistance;
+    this.difficulty = this.settings.difficulty;
     this.timeOfDay = 0.3;       // 0..1
     this.timePaused = false;
+    this._wasLocked = false;
     this.mode = 'creative';
     this.fps = 60;
     this._acc = 0; this._frames = 0; this._fpsTimer = 0;
@@ -1074,6 +1127,7 @@ class Game {
     this.touch = new TouchControls(this.input, this);
     this._prevHealth = 20; this._prevHunger = 20; this._wasInWater = false;
 
+    this.applySettings();
     this._spawn();
     if (saved) {
       const pos = applySave(this, saved);
@@ -1127,6 +1181,26 @@ class Game {
     this.player.setMode(this.mode);
   }
 
+  // Set game mode explicitly (used by the Options menu — the path to Survival).
+  applyGameMode(mode) {
+    if (mode !== 'creative' && mode !== 'survival' && mode !== 'spectator') return;
+    this.mode = mode;
+    this.player.setMode(mode);
+  }
+
+  // Push current settings into the live systems (called on change + each frame).
+  applySettings() {
+    const s = this.settings;
+    this.renderDistance = s.renderDistance;
+    this.difficulty = s.difficulty;
+    this.camera.perspective = s.perspective;
+    this.input.sensitivity = s.sensitivity;
+    this.input.invertY = s.invertY;
+    if (this.audio) this.audio.setVolume(s.volume);
+  }
+
+  saveNow() { if (save(this)) this.ui.flashSaved?.(); }
+
   onBreak(id, x, y, z) {
     if (id === ID.furnace) this.furnaces.delete(x + ',' + y + ',' + z);
     this.audio.break(BLOCKS[id]?.name);
@@ -1178,9 +1252,8 @@ class Game {
     const p = this.player;
     if (p.mode !== 'survival') return;
     if (p.dead) {
-      this._deathTimer += dt;
-      if (this.ui.invOpen) this.ui.closeScreen();
-      if (this._deathTimer >= 1.2) { this._respawn(); this._deathTimer = 0; }
+      // close gameplay containers but allow the pause/options menu (Respawn lives there + on the death screen)
+      if (this.ui.invOpen && !this.ui.isPauseScreen()) this.ui.closeScreen();
       return;
     }
 
@@ -1253,14 +1326,21 @@ class Game {
 
   _globalKeys() {
     const input = this.input;
-    if (input.wasTapped('KeyE')) { this.ui.toggleInventory(); }
+    // Escape / menu (also opened on pointer-lock loss in _loop, since some
+    // browsers swallow the Escape keydown that exits pointer lock).
+    if (input.wasTapped('Escape')) {
+      if (this.ui.screen === 'options') this.ui.openPause();
+      else if (this.ui.screen) this.ui.closeScreen();
+      else this.ui.openPause();
+    }
+    if (input.wasTapped('KeyE')) { if (this.ui.isPauseScreen()) this.ui.closeScreen(); else this.ui.toggleInventory(); }
     if (input.wasTapped('F3')) this.ui.toggleDebug();
-    if (input.wasTapped('KeyG')) this.cycleMode();
+    if (input.wasTapped('KeyG')) this.ui.openOptions();          // quick access to Options (Game Mode)
+    if (input.wasTapped('F5')) { this.settings.set('perspective', (this.settings.perspective + 1) % 3); this.applySettings(); }
     if (input.wasTapped('KeyT')) this.timePaused = !this.timePaused;
-    if (input.wasTapped('BracketRight')) this.renderDistance = Math.min(16, this.renderDistance + 1);
-    if (input.wasTapped('BracketLeft')) this.renderDistance = Math.max(3, this.renderDistance - 1);
-    if (input.wasTapped('Escape') && this.ui.invOpen) this.ui.toggleInventory(false);
-    if (input.wasTapped('KeyK')) { if (save(this)) this.ui.flashSaved?.(); }   // manual save
+    if (input.wasTapped('BracketRight')) { this.settings.set('renderDistance', this.settings.renderDistance + 1); this.applySettings(); }
+    if (input.wasTapped('BracketLeft')) { this.settings.set('renderDistance', this.settings.renderDistance - 1); this.applySettings(); }
+    if (input.wasTapped('KeyK')) this.saveNow();   // manual save
   }
 
   _env() {
@@ -1278,7 +1358,21 @@ class Game {
     return {
       dayLight, skyTop, skyBottom, fogColor,
       fogStart: far * 0.55, fogEnd: far * 0.95,
+      brightness: this.settings.brightness,
     };
+  }
+
+  // Smoothly ease the camera FOV toward the target (with optional sprint zoom).
+  _updateFov(dt) {
+    const base = this.settings.fov * Math.PI / 180;
+    let target = base;
+    if (this.settings.sprintFov) {
+      const p = this.player;
+      const speed = Math.hypot(p.vel[0], p.vel[2]);
+      if (!p.flying && speed > 5.5) target = base * 1.12;
+      else if (p.flying && speed > 12) target = base * 1.10;
+    }
+    this.camera.fov += (target - this.camera.fov) * Math.min(1, dt * 10);
   }
 
   _loop(now) {
@@ -1288,17 +1382,30 @@ class Game {
 
     this._globalKeys();
 
-    if (!this.timePaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
+    // open the pause menu when pointer lock is lost (some browsers swallow the
+    // Escape keydown that exits pointer lock, so we detect the lock transition).
+    if (this._wasLocked && !this.input.locked && !this.ui.invOpen) this.ui.openPause();
+    this._wasLocked = this.input.locked;
+
+    // live camera / control settings
+    this.input.sensitivity = this.settings.sensitivity;
+    this.input.invertY = this.settings.invertY;
+    this.camera.perspective = this.settings.perspective;
+    this._updateFov(dt);
+
+    const menuPaused = this.settings.pauseTimeInMenu && this.ui.isPauseScreen();
+
+    if (!this.timePaused && !menuPaused) this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH) % 1;
 
     const env = this._env();
     this.touch.update();
     this.player.mode = this.mode;
-    if (!this.ui.invOpen) {
+    if (!this.ui.invOpen && !this.player.dead) {
       this.player.update(dt, this.input, this);
     }
     this._survivalTick(dt);
     this._tickFurnaces(dt);
-    this.entities.update(dt, this.player, this, env);
+    if (!menuPaused) this.entities.update(dt, this.player, this, env);
     this._audioTick(dt);
     this.ui.setHint(!this.input.locked && !this.ui.invOpen);
 
@@ -2221,8 +2328,10 @@ class Player {
 
   _look(input) {
     const d = input.consumeLook();
-    this.yaw -= d.dx * SENS;
-    this.pitch -= d.dy * SENS;
+    const s = SENS * (input.sensitivity || 1);
+    const invY = input.invertY ? -1 : 1;
+    this.yaw -= d.dx * s;
+    this.pitch -= d.dy * s * invY;
     const lim = Math.PI / 2 - 0.001;
     if (this.pitch > lim) this.pitch = lim;
     if (this.pitch < -lim) this.pitch = -lim;
@@ -2606,6 +2715,17 @@ const LAYOUT = [
 
 // Build a colored cuboid (pos3 + color3 per vertex) into pos/idx arrays.
 // box: {x,y,z center (y from feet), w,h,d, color:[r,g,b 0..1]}
+// Simple humanoid player model (boxes, feet-origin), drawn only in 3rd person.
+const P_SKIN = [0.86, 0.67, 0.52], P_SHIRT = [0.18, 0.6, 0.85], P_PANTS = [0.22, 0.27, 0.5];
+const PLAYER_MODEL = [
+  { x: 0, y: 1.62, z: 0, w: 0.5, h: 0.5, d: 0.5, color: P_SKIN },     // head
+  { x: 0, y: 1.0, z: 0, w: 0.5, h: 0.75, d: 0.28, color: P_SHIRT },   // torso
+  { x: -0.37, y: 1.0, z: 0, w: 0.24, h: 0.7, d: 0.26, color: P_SHIRT },// left arm
+  { x: 0.37, y: 1.0, z: 0, w: 0.24, h: 0.7, d: 0.26, color: P_SHIRT }, // right arm
+  { x: -0.13, y: 0.42, z: 0, w: 0.24, h: 0.84, d: 0.26, color: P_PANTS }, // left leg
+  { x: 0.13, y: 0.42, z: 0, w: 0.24, h: 0.84, d: 0.26, color: P_PANTS },  // right leg
+];
+
 function buildBox(pos, idx, box) {
   const hw = box.w / 2, hh = box.h / 2, hd = box.d / 2;
   const x0 = box.x - hw, x1 = box.x + hw, y0 = box.y - hh, y1 = box.y + hh, z0 = box.z - hd, z1 = box.z + hd;
@@ -2701,19 +2821,43 @@ class Renderer {
       gl.bindVertexArray(null);
       this.entityMeshes[type] = { vao, count: idx.length };
     }
+    // player body (3rd-person only)
+    {
+      const pos = [], idx = [];
+      for (const box of PLAYER_MODEL) buildBox(pos, idx, box);
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      const vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+      const ebo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+      gl.bindVertexArray(null);
+      this.playerMesh = { vao, count: idx.length };
+    }
   }
 
-  _drawEntities(entityManager, proj, view, env) {
-    if (!entityManager || entityManager.mobs.length === 0) return;
+  // bind entity program + set the per-frame common uniforms; returns the program.
+  _entityBegin(proj, view, env) {
     const gl = this.gl, e = this.entity;
     gl.useProgram(e.program);
     gl.uniformMatrix4fv(e.uniforms.u_proj, false, proj);
     gl.uniformMatrix4fv(e.uniforms.u_view, false, view);
     gl.uniform1f(e.uniforms.u_dayLight, env.dayLight);
+    gl.uniform1f(e.uniforms.u_brightness, env.brightness == null ? 0.5 : env.brightness);
     gl.uniform3fv(e.uniforms.u_fogColor, env.fogColor);
     gl.uniform1f(e.uniforms.u_fogStart, env.fogStart);
     gl.uniform1f(e.uniforms.u_fogEnd, env.fogEnd);
     gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    return e;
+  }
+
+  _drawEntities(entityManager, proj, view, env) {
+    if (!entityManager || entityManager.mobs.length === 0) return;
+    const gl = this.gl, e = this._entityBegin(proj, view, env);
     for (const m of entityManager.mobs) {
       const mesh = this.entityMeshes[m.type];
       if (!mesh) continue;
@@ -2723,6 +2867,16 @@ class Renderer {
       gl.bindVertexArray(mesh.vao);
       gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
     }
+    gl.bindVertexArray(null);
+  }
+
+  _drawPlayerBody(player, proj, view, env) {
+    const gl = this.gl, e = this._entityBegin(proj, view, env);
+    modelMatrix(this._modelMat, player.pos[0], player.pos[1], player.pos[2], player.yaw);
+    gl.uniformMatrix4fv(e.uniforms.u_model, false, this._modelMat);
+    gl.uniform1f(e.uniforms.u_hurt, 0.0);
+    gl.bindVertexArray(this.playerMesh.vao);
+    gl.drawElements(gl.TRIANGLES, this.playerMesh.count, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(null);
   }
 
@@ -2776,7 +2930,7 @@ class Renderer {
 
     // Terrain
     const proj = camera.updateProj();
-    const view = camera.updateView(player);
+    const view = camera.updateView(player, world);
     const t = this.terrain;
     gl.useProgram(t.program);
     gl.uniformMatrix4fv(t.uniforms.u_proj, false, proj);
@@ -2786,6 +2940,7 @@ class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
     gl.uniform1i(t.uniforms.u_atlas, 0);
     gl.uniform1f(t.uniforms.u_dayLight, env.dayLight);
+    gl.uniform1f(t.uniforms.u_brightness, env.brightness == null ? 0.5 : env.brightness);
     gl.uniform3fv(t.uniforms.u_fogColor, env.fogColor);
     gl.uniform1f(t.uniforms.u_fogStart, env.fogStart);
     gl.uniform1f(t.uniforms.u_fogEnd, env.fogEnd);
@@ -2798,6 +2953,8 @@ class Renderer {
 
     // entities (opaque, between terrain and water) — this binds its own program
     this._drawEntities(entityManager, proj, view, env);
+    // player body in 3rd person
+    if (camera.perspective !== 0) this._drawPlayerBody(player, proj, view, env);
 
     // transparent pass — re-bind terrain program after the entity pass.
     // (terrain's other uniforms persist per-program from earlier this frame.)
@@ -2826,6 +2983,79 @@ class Renderer {
 }
 
 __exports.Renderer = Renderer;
+
+};
+__modules["settings.js"] = function(__exports, __require){
+// settings.js — persistent game options (FOV, sensitivity, brightness, volume,
+// render distance, camera perspective, difficulty…). DOM-free + testable.
+// Stored separately from the world save, in localStorage, since they're per-device.
+
+const KEY = 'mc_settings_v1';
+
+const SETTINGS_DEFAULTS = {
+  fov: 70,              // degrees, 30..110
+  sensitivity: 1.0,     // look-speed multiplier, 0.2..3.0
+  invertY: false,
+  renderDistance: 6,    // chunks, 3..16
+  brightness: 0.5,      // 0..1 (0.5 = neutral / current look)
+  volume: 0.5,          // 0..1 master audio
+  sprintFov: true,      // dynamic FOV boost while sprinting
+  perspective: 0,       // 0 = first person, 1 = third (behind), 2 = third (front)
+  pauseTimeInMenu: true,// freeze day/night while a menu is open
+  difficulty: 'normal', // 'peaceful' | 'easy' | 'normal' | 'hard'
+};
+
+const RANGES = {
+  fov: [30, 110], sensitivity: [0.2, 3.0], renderDistance: [3, 16],
+  brightness: [0, 1], volume: [0, 1],
+};
+
+class Settings {
+  constructor(storage) {
+    this.storage = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
+    Object.assign(this, SETTINGS_DEFAULTS);
+    this.load();
+  }
+
+  clamp(key, v) {
+    const r = RANGES[key];
+    if (!r) return v;
+    return v < r[0] ? r[0] : (v > r[1] ? r[1] : v);
+  }
+
+  set(key, value) {
+    if (!(key in SETTINGS_DEFAULTS)) return;
+    if (typeof SETTINGS_DEFAULTS[key] === 'number') value = this.clamp(key, value);
+    this[key] = value;
+    this.save();
+  }
+
+  reset() { Object.assign(this, SETTINGS_DEFAULTS); this.save(); }
+
+  load() {
+    try {
+      if (!this.storage) return;
+      const raw = this.storage.getItem(KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      for (const k of Object.keys(SETTINGS_DEFAULTS)) {
+        if (k in d && typeof d[k] === typeof SETTINGS_DEFAULTS[k]) this[k] = d[k];
+      }
+    } catch (e) { /* corrupt settings -> keep defaults */ }
+  }
+
+  save() {
+    try {
+      if (!this.storage) return;
+      const o = {};
+      for (const k of Object.keys(SETTINGS_DEFAULTS)) o[k] = this[k];
+      this.storage.setItem(KEY, JSON.stringify(o));
+    } catch (e) { /* storage full / unavailable -> ignore */ }
+  }
+}
+
+__exports.SETTINGS_DEFAULTS = SETTINGS_DEFAULTS;
+__exports.Settings = Settings;
 
 };
 __modules["shaders.js"] = function(__exports, __require){
@@ -2868,13 +3098,14 @@ uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_alphaTest;    // 1.0 = discard transparent texels (cutout), 0.0 = blend
+uniform float u_brightness;   // 0..1 user gamma (0.5 = neutral)
 
 out vec4 fragColor;
 
 void main() {
   vec4 tex = texture(u_atlas, v_uv);
   if (u_alphaTest > 0.5 && tex.a < 0.5) discard;
-  float ambient = 0.18;
+  float ambient = clamp(0.18 + (u_brightness - 0.5) * 0.5, 0.04, 0.6);
   float light = ambient + (1.0 - ambient) * u_dayLight;
   vec3 rgb = tex.rgb * v_color * light;
   float fog = clamp((v_dist - u_fogStart) / max(u_fogEnd - u_fogStart, 0.001), 0.0, 1.0);
@@ -2930,9 +3161,10 @@ uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_hurt;       // 0..1 red flash
+uniform float u_brightness; // 0..1 user gamma (0.5 = neutral)
 out vec4 fragColor;
 void main() {
-  float ambient = 0.30;
+  float ambient = clamp(0.30 + (u_brightness - 0.5) * 0.5, 0.08, 0.7);
   float light = ambient + (1.0 - ambient) * u_dayLight;
   vec3 rgb = v_color * light;
   rgb = mix(rgb, vec3(1.0, 0.2, 0.2), u_hurt);
@@ -3372,7 +3604,8 @@ class TouchControls {
     const util = el('div', 'tc-util'); root.appendChild(util);
     util.appendChild(this._btn('🎒', () => this.game.ui.toggleInventory(), null, true));
     util.appendChild(this._btn('✈', () => { const p = this.game.player; if (p.mode !== 'survival') { p.flying = !p.flying; p.vel[1] = 0; } }, null, true));
-    util.appendChild(this._btn('⇄', () => this.game.cycleMode(), null, true));
+    util.appendChild(this._btn('👁', () => { this.game.settings.set('perspective', (this.game.settings.perspective + 1) % 3); this.game.applySettings(); }, null, true));
+    util.appendChild(this._btn('⚙', () => this.game.ui.openOptions(), null, true));
   }
 
   _btn(label, onDown, onUp, small) {
@@ -3472,12 +3705,18 @@ class UI {
     this.debugEl = el('div', { id: 'debug' }); this.debugEl.style.display = 'none'; root.appendChild(this.debugEl);
 
     this.hintEl = el('div', { id: 'hint' });
-    this.hintEl.innerHTML = 'Click to play &nbsp;·&nbsp; WASD move · Space jump · double-Space fly · Shift sneak/down · Ctrl sprint · E inventory · G mode · F3 debug · 1-9 / wheel hotbar · LMB break · RMB place/use · K save (auto-saves too)';
+    this.hintEl.innerHTML = 'Click to play &nbsp;·&nbsp; WASD move · Space jump · double-Space fly · Shift sneak/down · Ctrl sprint · E inventory · Esc menu · G options · F5 camera · F3 debug · 1-9 / wheel hotbar · LMB break · RMB place/use<br><b>Change Game Mode (Survival) in Esc → Options.</b>';
     root.appendChild(this.hintEl);
 
-    // death screen
+    // death screen (with a real Respawn button)
     this.deathEl = el('div', { id: 'death' }); this.deathEl.style.display = 'none';
-    this.deathEl.innerHTML = '<h1>You Died!</h1><p>Respawning…</p>';
+    const dHead = el('h1'); dHead.textContent = 'You Died!';
+    const dSub = el('p'); dSub.textContent = 'Game over';
+    const respawnBtn = el('button', { class: 'mc-btn' }); respawnBtn.textContent = 'Respawn';
+    respawnBtn.addEventListener('click', () => { if (this.game) this.game._respawn(); });
+    const dOpts = el('button', { class: 'mc-btn' }); dOpts.textContent = 'Options…';
+    dOpts.addEventListener('click', () => this.openOptions());
+    this.deathEl.append(dHead, dSub, respawnBtn, dOpts);
     root.appendChild(this.deathEl);
 
     // saved toast
@@ -3511,6 +3750,124 @@ class UI {
     if (document.pointerLockElement) document.exitPointerLock();
     this._renderCreative();
     this.screenEl.style.display = 'flex';
+  }
+
+  // ---- pause / options menus ----
+  isPauseScreen() { return this.screen === 'pause' || this.screen === 'options'; }
+
+  openPause() {
+    this.screen = 'pause'; this.invOpen = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this._renderPause();
+    this.screenEl.style.display = 'flex';
+  }
+  openOptions() {
+    this.screen = 'options'; this.invOpen = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this._renderOptions();
+    this.screenEl.style.display = 'flex';
+  }
+
+  _menuPanel(titleText) {
+    const panel = el('div', { class: 'panel mc-menu' });
+    const t = el('div', { class: 'panel-title' }); t.textContent = titleText;
+    panel.appendChild(t);
+    return panel;
+  }
+  _menuButton(label, onClick) {
+    const b = el('button', { class: 'mc-btn' });
+    b.textContent = label;
+    b.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    return b;
+  }
+  _rangeRow(label, key, min, max, step, fmt) {
+    const s = this.game.settings;
+    const row = el('div', { class: 'mc-row' });
+    const lab = el('label', { class: 'mc-label' });
+    const val = el('span', { class: 'mc-val' });
+    lab.textContent = label + ': '; lab.appendChild(val);
+    const inp = el('input', { class: 'mc-range' });
+    inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = s[key];
+    const render = () => { val.textContent = fmt ? fmt(s[key]) : s[key]; };
+    inp.addEventListener('input', () => { s.set(key, parseFloat(inp.value)); this.game.applySettings(); render(); });
+    render();
+    row.append(lab, inp);
+    return row;
+  }
+  _toggleRow(label, key) {
+    const s = this.game.settings;
+    const row = el('div', { class: 'mc-row' });
+    const lab = el('label', { class: 'mc-label' }); lab.textContent = label;
+    const b = this._menuButton('', () => { s.set(key, !s[key]); this.game.applySettings(); upd(); });
+    const upd = () => { b.textContent = s[key] ? 'ON' : 'OFF'; };
+    upd();
+    row.append(lab, b);
+    return row;
+  }
+  _cycleRow(label, options, getCur, setCur) {
+    const row = el('div', { class: 'mc-row' });
+    const lab = el('label', { class: 'mc-label' }); lab.textContent = label;
+    const b = this._menuButton('', () => {
+      let i = options.findIndex((o) => o.value === getCur());
+      i = (i + 1) % options.length;
+      setCur(options[i].value); upd();
+    });
+    const upd = () => {
+      const cur = getCur();
+      const o = options.find((x) => x.value === cur) || options[0];
+      b.textContent = o.label;
+    };
+    upd();
+    row.append(lab, b);
+    return row;
+  }
+
+  _renderPause() {
+    const g = this.game;
+    const panel = this._menuPanel('Game Menu');
+    const mode = g ? g.mode : 'creative';
+    const sub = el('div', { class: 'mc-sub' });
+    sub.textContent = 'Mode: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+    panel.appendChild(sub);
+    panel.appendChild(this._menuButton('Back to Game', () => this.closeScreen()));
+    panel.appendChild(this._menuButton('Options…', () => this.openOptions()));
+    panel.appendChild(this._menuButton('Save Game', () => { if (g && g.saveNow) g.saveNow(); }));
+    if (g && this.player.dead) panel.appendChild(this._menuButton('Respawn', () => { g._respawn(); this.closeScreen(); }));
+    this.screenEl.innerHTML = ''; this.screenEl.appendChild(panel);
+  }
+
+  _renderOptions() {
+    const g = this.game, s = g.settings;
+    const panel = this._menuPanel('Options');
+    const note = el('div', { class: 'mc-sub' }); note.textContent = 'Change Game Mode here to enter Survival.';
+    panel.appendChild(note);
+
+    // Game Mode is the gateway to Survival (per design).
+    panel.appendChild(this._cycleRow('Game Mode',
+      [{ value: 'creative', label: 'Creative' }, { value: 'survival', label: 'Survival' }, { value: 'spectator', label: 'Spectator' }],
+      () => g.mode, (v) => g.applyGameMode(v)));
+    panel.appendChild(this._cycleRow('Difficulty',
+      [{ value: 'peaceful', label: 'Peaceful' }, { value: 'easy', label: 'Easy' }, { value: 'normal', label: 'Normal' }, { value: 'hard', label: 'Hard' }],
+      () => s.difficulty, (v) => { s.set('difficulty', v); g.applySettings(); }));
+    panel.appendChild(this._cycleRow('Camera Perspective',
+      [{ value: 0, label: 'First Person' }, { value: 1, label: 'Third Person (Back)' }, { value: 2, label: 'Third Person (Front)' }],
+      () => s.perspective, (v) => { s.set('perspective', v); g.applySettings(); }));
+    panel.appendChild(this._rangeRow('FOV', 'fov', 30, 110, 1, (v) => Math.round(v) + '°'));
+    panel.appendChild(this._rangeRow('Mouse Sensitivity', 'sensitivity', 0.2, 3, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._toggleRow('Invert Y-axis', 'invertY'));
+    panel.appendChild(this._rangeRow('Render Distance', 'renderDistance', 3, 16, 1, (v) => Math.round(v) + ' chunks'));
+    panel.appendChild(this._rangeRow('Brightness', 'brightness', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._rangeRow('Master Volume', 'volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%'));
+    panel.appendChild(this._toggleRow('Sprint FOV Effect', 'sprintFov'));
+    panel.appendChild(this._toggleRow('Pause Time in Menu', 'pauseTimeInMenu'));
+
+    const footer = el('div', { class: 'mc-footer' });
+    footer.append(
+      this._menuButton('Reset to Defaults', () => { s.reset(); g.applySettings(); this._renderOptions(); }),
+      this._menuButton('Done', () => this.openPause())
+    );
+    panel.appendChild(footer);
+    this.screenEl.innerHTML = ''; this.screenEl.appendChild(panel);
   }
 
   // mode-aware toggle (called by game on 'E')

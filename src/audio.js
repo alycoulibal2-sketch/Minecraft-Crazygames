@@ -7,6 +7,13 @@ export class Audio {
     this.master = null;
     this.enabled = true;
     this._lastStep = 0;
+    this.volume = 0.5;   // 0..1 (mapped to a safe gain ceiling)
+  }
+
+  // Set master volume (0..1). Applied immediately if the context exists.
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master) this.master.gain.value = this.volume * 0.7;
   }
 
   // Create/resume the context — must be called from a user gesture.
@@ -18,7 +25,7 @@ export class Audio {
         if (!AC) { this.enabled = false; return; }
         this.ctx = new AC();
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.35;
+        this.master.gain.value = this.volume * 0.7;
         this.master.connect(this.ctx.destination);
       }
       if (this.ctx.state === 'suspended') this.ctx.resume();

@@ -17,6 +17,17 @@ const LAYOUT = [
 
 // Build a colored cuboid (pos3 + color3 per vertex) into pos/idx arrays.
 // box: {x,y,z center (y from feet), w,h,d, color:[r,g,b 0..1]}
+// Simple humanoid player model (boxes, feet-origin), drawn only in 3rd person.
+const P_SKIN = [0.86, 0.67, 0.52], P_SHIRT = [0.18, 0.6, 0.85], P_PANTS = [0.22, 0.27, 0.5];
+const PLAYER_MODEL = [
+  { x: 0, y: 1.62, z: 0, w: 0.5, h: 0.5, d: 0.5, color: P_SKIN },     // head
+  { x: 0, y: 1.0, z: 0, w: 0.5, h: 0.75, d: 0.28, color: P_SHIRT },   // torso
+  { x: -0.37, y: 1.0, z: 0, w: 0.24, h: 0.7, d: 0.26, color: P_SHIRT },// left arm
+  { x: 0.37, y: 1.0, z: 0, w: 0.24, h: 0.7, d: 0.26, color: P_SHIRT }, // right arm
+  { x: -0.13, y: 0.42, z: 0, w: 0.24, h: 0.84, d: 0.26, color: P_PANTS }, // left leg
+  { x: 0.13, y: 0.42, z: 0, w: 0.24, h: 0.84, d: 0.26, color: P_PANTS },  // right leg
+];
+
 function buildBox(pos, idx, box) {
   const hw = box.w / 2, hh = box.h / 2, hd = box.d / 2;
   const x0 = box.x - hw, x1 = box.x + hw, y0 = box.y - hh, y1 = box.y + hh, z0 = box.z - hd, z1 = box.z + hd;
@@ -112,19 +123,43 @@ export class Renderer {
       gl.bindVertexArray(null);
       this.entityMeshes[type] = { vao, count: idx.length };
     }
+    // player body (3rd-person only)
+    {
+      const pos = [], idx = [];
+      for (const box of PLAYER_MODEL) buildBox(pos, idx, box);
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      const vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+      const ebo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+      gl.bindVertexArray(null);
+      this.playerMesh = { vao, count: idx.length };
+    }
   }
 
-  _drawEntities(entityManager, proj, view, env) {
-    if (!entityManager || entityManager.mobs.length === 0) return;
+  // bind entity program + set the per-frame common uniforms; returns the program.
+  _entityBegin(proj, view, env) {
     const gl = this.gl, e = this.entity;
     gl.useProgram(e.program);
     gl.uniformMatrix4fv(e.uniforms.u_proj, false, proj);
     gl.uniformMatrix4fv(e.uniforms.u_view, false, view);
     gl.uniform1f(e.uniforms.u_dayLight, env.dayLight);
+    gl.uniform1f(e.uniforms.u_brightness, env.brightness == null ? 0.5 : env.brightness);
     gl.uniform3fv(e.uniforms.u_fogColor, env.fogColor);
     gl.uniform1f(e.uniforms.u_fogStart, env.fogStart);
     gl.uniform1f(e.uniforms.u_fogEnd, env.fogEnd);
     gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    return e;
+  }
+
+  _drawEntities(entityManager, proj, view, env) {
+    if (!entityManager || entityManager.mobs.length === 0) return;
+    const gl = this.gl, e = this._entityBegin(proj, view, env);
     for (const m of entityManager.mobs) {
       const mesh = this.entityMeshes[m.type];
       if (!mesh) continue;
@@ -134,6 +169,16 @@ export class Renderer {
       gl.bindVertexArray(mesh.vao);
       gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
     }
+    gl.bindVertexArray(null);
+  }
+
+  _drawPlayerBody(player, proj, view, env) {
+    const gl = this.gl, e = this._entityBegin(proj, view, env);
+    modelMatrix(this._modelMat, player.pos[0], player.pos[1], player.pos[2], player.yaw);
+    gl.uniformMatrix4fv(e.uniforms.u_model, false, this._modelMat);
+    gl.uniform1f(e.uniforms.u_hurt, 0.0);
+    gl.bindVertexArray(this.playerMesh.vao);
+    gl.drawElements(gl.TRIANGLES, this.playerMesh.count, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(null);
   }
 
@@ -187,7 +232,7 @@ export class Renderer {
 
     // Terrain
     const proj = camera.updateProj();
-    const view = camera.updateView(player);
+    const view = camera.updateView(player, world);
     const t = this.terrain;
     gl.useProgram(t.program);
     gl.uniformMatrix4fv(t.uniforms.u_proj, false, proj);
@@ -197,6 +242,7 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
     gl.uniform1i(t.uniforms.u_atlas, 0);
     gl.uniform1f(t.uniforms.u_dayLight, env.dayLight);
+    gl.uniform1f(t.uniforms.u_brightness, env.brightness == null ? 0.5 : env.brightness);
     gl.uniform3fv(t.uniforms.u_fogColor, env.fogColor);
     gl.uniform1f(t.uniforms.u_fogStart, env.fogStart);
     gl.uniform1f(t.uniforms.u_fogEnd, env.fogEnd);
@@ -209,6 +255,8 @@ export class Renderer {
 
     // entities (opaque, between terrain and water) — this binds its own program
     this._drawEntities(entityManager, proj, view, env);
+    // player body in 3rd person
+    if (camera.perspective !== 0) this._drawPlayerBody(player, proj, view, env);
 
     // transparent pass — re-bind terrain program after the entity pass.
     // (terrain's other uniforms persist per-program from earlier this frame.)

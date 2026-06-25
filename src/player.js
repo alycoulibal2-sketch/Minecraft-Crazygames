@@ -71,8 +71,10 @@ export class Player {
 
   _look(input) {
     const d = input.consumeLook();
-    this.yaw -= d.dx * SENS;
-    this.pitch -= d.dy * SENS;
+    const s = SENS * (input.sensitivity || 1);
+    const invY = input.invertY ? -1 : 1;
+    this.yaw -= d.dx * s;
+    this.pitch -= d.dy * s * invY;
     const lim = Math.PI / 2 - 0.001;
     if (this.pitch > lim) this.pitch = lim;
     if (this.pitch < -lim) this.pitch = -lim;

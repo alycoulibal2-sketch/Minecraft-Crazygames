@@ -78,7 +78,8 @@ export class TouchControls {
     const util = el('div', 'tc-util'); root.appendChild(util);
     util.appendChild(this._btn('🎒', () => this.game.ui.toggleInventory(), null, true));
     util.appendChild(this._btn('✈', () => { const p = this.game.player; if (p.mode !== 'survival') { p.flying = !p.flying; p.vel[1] = 0; } }, null, true));
-    util.appendChild(this._btn('⇄', () => this.game.cycleMode(), null, true));
+    util.appendChild(this._btn('👁', () => { this.game.settings.set('perspective', (this.game.settings.perspective + 1) % 3); this.game.applySettings(); }, null, true));
+    util.appendChild(this._btn('⚙', () => this.game.ui.openOptions(), null, true));
   }
 
   _btn(label, onDown, onUp, small) {

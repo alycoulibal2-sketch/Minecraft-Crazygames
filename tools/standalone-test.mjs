@@ -81,5 +81,15 @@ try {
 } catch (e) { err = e; }
 assert(!err, 'survival + inventory screen run without throwing' + (err ? ': ' + err.stack : ''));
 
+err = null;
+try {
+  game.ui.openPause(); game._loop(6100);
+  game.ui.openOptions(); game._loop(6116);
+  game.settings.set('perspective', 1); game.applySettings(); game._loop(6132); // 3rd-person
+  game.applyGameMode('creative'); game.ui.closeScreen(); game._loop(6148);
+  game.settings.set('perspective', 0); game.applySettings();
+} catch (e) { err = e; }
+assert(!err, 'bundled pause/options menus + 3rd-person run without throwing' + (err ? ': ' + err.stack : ''));
+
 console.log('\n' + (failures === 0 ? '✅ STANDALONE TEST PASSED (single-file boots + runs headlessly)' : `❌ ${failures} STANDALONE ASSERTION(S) FAILED`));
 process.exit(failures === 0 ? 0 : 1);
