@@ -91,7 +91,10 @@ Pure ES modules under `src/`, no bundler:
 | `ui.js` | crosshair, hotbar, inventory/crafting/furnace screens, HUD |
 | `game.js` / `main.js` | main loop, day/night, survival tick, bootstrap |
 
-`tools/smoke-test.mjs` runs the DOM-free engine headlessly (`npm test`) to validate world-gen, meshing, raycast, physics and texture coverage in CI without a browser.
+Headless test suite (`npm test`, also run in CI) — no browser required:
+- `tools/smoke-test.mjs` — world-gen, meshing, raycast, physics, items, inventory, crafting, smelting, survival, persistence, mobs.
+- `tools/ui-test.mjs` — inventory/crafting interaction logic against a DOM stub.
+- `tools/boot-test.mjs` — constructs the **whole game** (renderer, world, UI, entities, audio, touch) against no-op WebGL/DOM stubs and runs ~180 real frames across creative, survival, every container screen, and save/reload, to catch integration errors.
 
 ## 📜 License
 
