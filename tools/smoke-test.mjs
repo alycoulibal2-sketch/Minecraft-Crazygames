@@ -123,6 +123,11 @@ assert(breakSeconds(BLOCKS[ID.bedrock], woodPick) === Infinity, 'bedrock is unbr
 assert(dropsWith(BLOCKS[ID.stone], woodPick) === true, 'wood pick drops stone');
 assert(dropsWith(BLOCKS[ID.diamond_ore], woodPick) === false, 'wood pick does NOT drop diamond ore');
 assert(dropsWith(BLOCKS[ID.diamond_ore], itemByName('iron_pickaxe')) === true, 'iron pick drops diamond ore');
+// hand-mining must be reasonable for non-pickaxe blocks (the "can't break by hand" fix)
+assert(breakSeconds(BLOCKS[ID.dirt], null) <= 1.0, `dirt breaks fast by hand (${breakSeconds(BLOCKS[ID.dirt], null)}s)`);
+assert(breakSeconds(BLOCKS[ID.grass_block], null) <= 1.0, `grass breaks fast by hand (${breakSeconds(BLOCKS[ID.grass_block], null)}s)`);
+assert(breakSeconds(BLOCKS[ID.oak_log], null) <= 3.5, `logs break by hand in a sane time (${breakSeconds(BLOCKS[ID.oak_log], null)}s)`);
+assert(breakSeconds(BLOCKS[ID.stone], null) > breakSeconds(BLOCKS[ID.dirt], null), 'pickaxe blocks (stone) still take longer by hand than dirt');
 
 console.log('\n== Inventory ==');
 const { Inventory, INV_SIZE } = await import(S('inventory.js'));
@@ -321,6 +326,23 @@ assert(dropItemsOk, 'all mob drop items exist in the item registry');
   const before = zomb.health;
   pl._interact(1 / 60, inp, game);
   assert(zomb.health < before, `melee with diamond sword reduced mob health (${before} -> ${zomb.health})`);
+}
+
+console.log('\n== Survival hand-mining removes a block ==');
+{
+  let removed = false;
+  const stub = {
+    getBlock: (x, y, z) => (!removed && x === 0 && y === 64 && z === 0) ? ID.dirt : (y < 64 ? ID.stone : AIR),
+    setBlock: (x, y, z, id) => { if (id === AIR && x === 0 && y === 64 && z === 0) removed = true; },
+    raycast: () => removed ? { hit: false } : { hit: true, id: ID.dirt, x: 0, y: 64, z: 0, nx: 0, ny: 1, nz: 0, t: 1.0 },
+  };
+  const pl = new Player(stub); pl.mode = 'survival'; pl.pos = [0.5, 65.5, 0.5]; pl.pitch = -Math.PI / 2;
+  const inp = makeInput(); inp.buttons[0] = true;     // hold left mouse
+  const dt = 1 / 60; let t = 0;
+  while (!removed && t < 5) { pl._interact(dt, inp, { entities: null }); t += dt; }
+  assert(removed, 'holding break removes a dirt block by hand in survival');
+  assert(t < 1.2, `dirt mined by hand in ~1s (t=${t.toFixed(2)}s)`);
+  assert(pl.inventory.has(ITEM_ID['dirt']), 'mined dirt dropped into inventory');
 }
 
 console.log('\n== Settings (persist / clamp / reset) ==');

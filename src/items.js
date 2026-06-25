@@ -109,12 +109,19 @@ export function itemById(id) { return ITEMS[id]; }
 export const ITEM_ICON_NAMES = ITEMS.filter(i => i.icon.startsWith('i_')).map(i => i.icon);
 
 // Mining speed for a tool item vs a block. Returns seconds to break.
+// The harsh 5x "wrong tool" penalty only applies to blocks that actually REQUIRE
+// a tool to be harvested (pickaxe blocks: stone/ores). Everything else — dirt,
+// grass, sand, wood, wool, leaves… — breaks at the normal rate by hand, just
+// faster with the matching tool. This matches Minecraft and means you can always
+// mine by hand.
 export function breakSeconds(block, toolItem) {
   if (block.hardness < 0) return Infinity;     // unbreakable
   if (block.hardness === 0) return 0.05;
   const correctTool = toolItem && toolItem.tool === block.tool;
-  const base = block.hardness * (correctTool ? 1.5 : 5.0);
+  const requiresTool = block.tool === 'pickaxe';        // only pickaxe blocks need a tool to harvest
+  const canHarvest = correctTool || !requiresTool;      // hand can harvest everything else
   const speed = correctTool ? toolItem.speed : 1;
+  const base = block.hardness * (canHarvest ? 1.5 : 5.0);
   return Math.max(0.05, base / speed);
 }
 

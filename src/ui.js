@@ -59,6 +59,13 @@ export class UI {
 
     const cross = el('div', { id: 'crosshair' }); cross.textContent = '+'; root.appendChild(cross);
 
+    // mining progress bar (under crosshair) — shows hold-to-break progress
+    this.breakBarEl = el('div', { id: 'breakbar' });
+    this.breakBarFill = el('div');
+    this.breakBarEl.appendChild(this.breakBarFill);
+    this.breakBarEl.style.display = 'none';
+    root.appendChild(this.breakBarEl);
+
     // hotbar
     this.hotbarEl = el('div', { id: 'hotbar' });
     this.slotEls = [];
@@ -474,6 +481,15 @@ export class UI {
 
     // hotbar
     this._refreshHotbar();
+
+    // mining progress
+    const bp = p.breakProgress || 0;
+    if (bp > 0 && bp < 1 && !this.invOpen) {
+      this.breakBarEl.style.display = 'block';
+      this.breakBarFill.style.width = Math.round(bp * 100) + '%';
+    } else {
+      this.breakBarEl.style.display = 'none';
+    }
 
     // open screen: refresh live (furnace progress / counts)
     if (this.invOpen && this.screen) {

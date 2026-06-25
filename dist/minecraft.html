@@ -14,6 +14,10 @@
   #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     color: #fff; font-size: 26px; line-height: 1; mix-blend-mode: difference; text-shadow: 0 0 2px #000; }
 
+  #breakbar { position: absolute; left: 50%; top: calc(50% + 20px); transform: translateX(-50%);
+    width: 48px; height: 6px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.45); border-radius: 2px; z-index: 11; }
+  #breakbar div { height: 100%; width: 0%; background: #eaeaea; border-radius: 1px; }
+
   #hotbar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
     display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.35); border: 2px solid rgba(0,0,0,0.5); border-radius: 6px; }
   .slot { position: relative; width: 52px; height: 52px; background: rgba(255,255,255,0.08); border: 2px solid rgba(0,0,0,0.4);
@@ -1828,12 +1832,19 @@ function itemById(id) { return ITEMS[id]; }
 const ITEM_ICON_NAMES = ITEMS.filter(i => i.icon.startsWith('i_')).map(i => i.icon);
 
 // Mining speed for a tool item vs a block. Returns seconds to break.
+// The harsh 5x "wrong tool" penalty only applies to blocks that actually REQUIRE
+// a tool to be harvested (pickaxe blocks: stone/ores). Everything else — dirt,
+// grass, sand, wood, wool, leaves… — breaks at the normal rate by hand, just
+// faster with the matching tool. This matches Minecraft and means you can always
+// mine by hand.
 function breakSeconds(block, toolItem) {
   if (block.hardness < 0) return Infinity;     // unbreakable
   if (block.hardness === 0) return 0.05;
   const correctTool = toolItem && toolItem.tool === block.tool;
-  const base = block.hardness * (correctTool ? 1.5 : 5.0);
+  const requiresTool = block.tool === 'pickaxe';        // only pickaxe blocks need a tool to harvest
+  const canHarvest = correctTool || !requiresTool;      // hand can harvest everything else
   const speed = correctTool ? toolItem.speed : 1;
+  const base = block.hardness * (canHarvest ? 1.5 : 5.0);
   return Math.max(0.05, base / speed);
 }
 
@@ -3688,6 +3699,13 @@ class UI {
 
     const cross = el('div', { id: 'crosshair' }); cross.textContent = '+'; root.appendChild(cross);
 
+    // mining progress bar (under crosshair) — shows hold-to-break progress
+    this.breakBarEl = el('div', { id: 'breakbar' });
+    this.breakBarFill = el('div');
+    this.breakBarEl.appendChild(this.breakBarFill);
+    this.breakBarEl.style.display = 'none';
+    root.appendChild(this.breakBarEl);
+
     // hotbar
     this.hotbarEl = el('div', { id: 'hotbar' });
     this.slotEls = [];
@@ -4103,6 +4121,15 @@ class UI {
 
     // hotbar
     this._refreshHotbar();
+
+    // mining progress
+    const bp = p.breakProgress || 0;
+    if (bp > 0 && bp < 1 && !this.invOpen) {
+      this.breakBarEl.style.display = 'block';
+      this.breakBarFill.style.width = Math.round(bp * 100) + '%';
+    } else {
+      this.breakBarEl.style.display = 'none';
+    }
 
     // open screen: refresh live (furnace progress / counts)
     if (this.invOpen && this.screen) {
